@@ -214,6 +214,10 @@ class GraphDesignerView(GraphBaseView):
                 .distinct()
             )
 
+            # Append root if resource instances exist.
+            if not self.graph.is_editable() and self.graph.root.nodeid not in restricted_nodegroups:
+                restricted_nodegroups = (*restricted_nodegroups, self.graph.root.nodeid)
+
         context = self.get_context_data(
             main_script="views/graph-designer",
             datatypes_json=JSONSerializer().serialize(datatypes, exclude=["modulename", "isgeometric"]),

@@ -1,4 +1,4 @@
-Django @ https://github.com/django/django@main
+Django @ https://github.com/django/django
 psycopg2==2.9.6
 urllib3<2
 elasticsearch>=8.3.1,<9.0.0

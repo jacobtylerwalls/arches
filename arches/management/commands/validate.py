@@ -51,12 +51,17 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         choices = [check.value for check in IntegrityCheck]
 
-        parser.add_argument("--fix-all", action="store_true", dest="fix_all", default=False,
-                            help="Apply all fix actions.")
-        parser.add_argument("--fix", action="extend", nargs="+", type=int, default=[], choices=choices,
-                            help="List the error codes to fix, e.g. --fix 1001 1002 ...")
-        parser.add_argument("--limit", action="store", type=int,
-                            help="Maximum number of rows to print; does not affect fix actions")
+        parser.add_argument("--fix-all", action="store_true", dest="fix_all", default=False, help="Apply all fix actions.")
+        parser.add_argument(
+            "--fix",
+            action="extend",
+            nargs="+",
+            type=int,
+            default=[],
+            choices=choices,
+            help="List the error codes to fix, e.g. --fix 1001 1002 ...",
+        )
+        parser.add_argument("--limit", action="store", type=int, help="Maximum number of rows to print; does not affect fix actions")
 
     def handle(self, *args, **options):
         self.options = options
@@ -85,15 +90,12 @@ class Command(BaseCommand):
         # Add checks here in numerical order
         self.check_integrity(
             check=IntegrityCheck.NODE_HAS_ONTOLOGY_GRAPH_DOES_NOT,  # 1005
-            queryset=models.Node.objects.only("ontologyclass", "graph").filter(
-                ontologyclass__isnull=False).filter(graph__ontology=None),
+            queryset=models.Node.objects.only("ontologyclass", "graph").filter(ontologyclass__isnull=False).filter(graph__ontology=None),
             fix_action=None,
         )
         self.check_integrity(
             check=IntegrityCheck.NODELESS_NODE_GROUP,  # 1012
-            queryset=models.NodeGroup.objects.filter(
-                ~Exists(models.Node.objects.filter(nodegroup_id=OuterRef("nodegroupid")))
-            ),
+            queryset=models.NodeGroup.objects.filter(~Exists(models.Node.objects.filter(nodegroup_id=OuterRef("nodegroupid")))),
             fix_action=DELETE_QUERYSET,
         )
 

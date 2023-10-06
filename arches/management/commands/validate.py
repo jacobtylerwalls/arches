@@ -22,10 +22,13 @@ from arches import __version__
 from arches.app.const import IntegrityCheck
 from arches.app.models import models
 from django.core.management.base import BaseCommand, CommandError
-from django.db import transaction
-from django.db.models import Exists, OuterRef
+from django.db import connection, transaction
+from django.db.models import Exists, OuterRef, Func, F
 from django.db.models.fields import UUIDField
 from django.db.models.functions import Cast
+
+from pprint import pprint as pp
+import uuid
 
 from django.db.models.fields.json import KT
 
@@ -113,16 +116,33 @@ class Command(BaseCommand):
             else:
                 all_corrupt_tiles = all_corrupt_tiles | corrupt_tiles
 
+        annotated_tile_values = models.VwTileValidate.objects.filter(datatype='concept').annotate(valid_concepts = Func(F('nodeid'), function = '__arches_get_labels_for_concept_node'))
+
+        corrupt_tile_ids = []
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT nodeid, nodevalue, tileid from vw_tile_data_validate WHERE datatype IN ('concept', 'concept-list') AND nodevalue IS NOT NULL")
+            results = (cursor.fetchone(), ) # lhs: todo: get all
+            for result in results:
+                nodeid, concept_values, tileid = result
+                stripped = concept_values[1:-1]  # stringified uuids!
+                split = stripped.split(',')
+                quotes_removed = [x.replace('"', '') for x in split]
+
+                cursor.execute(f"SELECT valueid from __arches_get_labels_for_concept_node('{nodeid}')")
+                valid_concepts = cursor.fetchall()  ## need to aggregate results
+
+                for concept_value in quotes_removed:
+                    if concept_value not in str(valid_concepts):
+                        corrupt_tile_ids.append(tileid)
+
         self.check_integrity(
             check=IntegrityCheck.TILE_STORING_NONEXISTENT_CONCEPT,  # 2000
-            # queryset=models.VwTileValidate.objects.filter(datatype__in=["concept"]).filter(  # , "concept-list"]
-            #     ~Exists(
-            #         models.Value.objects.annotate(casted_pk=Cast("valueid", output_field=CharField())).filter(
-            #             casted_pk=Cast(OuterRef("nodevalue"), output_field=CharField())
-            #         )
-            #     ),
-            # ),
             queryset=all_corrupt_tiles,
+            fix_action=None,
+        )
+        self.check_integrity(
+            check=IntegrityCheck.TILE_STORING_INVALID_CONCEPT,  # 2001
+            queryset=models.TileModel.objects.filter(pk__in=corrupt_tile_ids),
             fix_action=None,
         )
 

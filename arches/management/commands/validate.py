@@ -116,6 +116,12 @@ class Command(BaseCommand):
             else:
                 all_corrupt_tiles = all_corrupt_tiles | corrupt_tiles
 
+        self.check_integrity(
+            check=IntegrityCheck.TILE_STORING_NONEXISTENT_CONCEPT,  # 2000
+            queryset=all_corrupt_tiles,
+            fix_action=None,
+        )
+
         corrupt_tile_ids = []
         valid_concepts_for_nodes = {}
         concept_values_for_report = {}
@@ -143,11 +149,6 @@ class Command(BaseCommand):
                         concept_values_for_report[tileid] = concept_value  # will overwrite
                         concept_nodes_for_report[tileid] = nodeid  # will overwrite
 
-        self.check_integrity(
-            check=IntegrityCheck.TILE_STORING_NONEXISTENT_CONCEPT,  # 2000
-            queryset=all_corrupt_tiles,
-            fix_action=None,
-        )
         self.check_integrity(
             check=IntegrityCheck.TILE_STORING_INVALID_CONCEPT,  # 2001
             queryset=models.TileModel.objects.filter(pk__in=corrupt_tile_ids),

@@ -131,7 +131,7 @@ class Command(BaseCommand):
         if self.mode == VALIDATE:
             # Fixable?
             fix_status = self.style.MIGRATE_HEADING("Yes") if fix_action else self.style.NOTICE("No")
-            if len(queryset):
+            if queryset.exists():
                 fix_status = self.style.MIGRATE_HEADING("N/A")
         else:
             if not self.options["fix_all"] and check.value not in self.options["fix"]:
@@ -144,7 +144,7 @@ class Command(BaseCommand):
                     fix_status = self.style.MIGRATE_HEADING("N/A")
                 else:
                     raise CommandError(f"Requested fixing unfixable - {check.value}: {check}")
-            elif len(queryset):
+            elif queryset.exists():
                 fix_status = self.style.ERROR("No")  # until actually fixed below
                 # Perform fix action
                 if fix_action is DELETE_QUERYSET:
@@ -170,12 +170,12 @@ class Command(BaseCommand):
             if self.options["verbosity"] > 1:
                 self.stdout.write("\t" + "-" * 36)
                 if queryset:
-                    for i, n in enumerate(queryset):
+                    for i, row in enumerate(queryset):
                         if i < limit:
-                            if False:  # check.value == 2000:
-                                self.stdout.write(f"Node: {n.nodeid} | Tile: {n.tileid} | Value: {n.nodevalue}")
+                            if check.value == 2000:
+                                self.stdout.write(f"Nodegroup: {row.nodegroup.pk} | Tile: {row.tileid} | Value: {row.concept_value}")
                             else:
-                                self.stdout.write(f"{n.pk}")
+                                self.stdout.write(f"{row.pk}")
                         else:
                             self.stdout.write("\t\t(truncated...)")
                             break

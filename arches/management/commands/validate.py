@@ -24,6 +24,10 @@ from arches.app.models import models
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from django.db.models import Exists, OuterRef
+from django.db.models.fields import CharField
+from django.db.models.functions import Cast
+
+from django.db.models.fields.json import KT
 
 # Command modes
 FIX = "fix"
@@ -93,6 +97,36 @@ class Command(BaseCommand):
             fix_action=DELETE_QUERYSET,
         )
 
+        concept_nodes = models.Node.objects.filter(datatype="concept")
+        values_annotated = models.Value.objects.annotate(casted_id=Cast("valueid", output_field=CharField())).values_list(
+            "casted_id", flat=True
+        )
+        corrupt_tile_pks = []
+        for concept_node in concept_nodes:
+            tiles_annotated = (
+                models.TileModel.objects.filter(data__has_key=str(concept_node.pk))
+                .annotate(concept_value=KT(f"data__{str(concept_node.pk)}"))
+                .filter(concept_value__isnull=False)
+            )
+            for tile in tiles_annotated:
+                if tile.concept_value not in values_annotated:
+                    corrupt_tile_pks.append(tile.pk)
+        corrupt_tiles = models.TileModel.objects.filter(pk__in=corrupt_tile_pks)
+        # corrupt_tiles = tiles_annotated.filter(~Exists(values_annotated.filter(casted_id=OuterRef("concept_value"))))
+
+        self.check_integrity(
+            check=IntegrityCheck.TILE_STORING_NONEXISTENT_CONCEPT,  # 2000
+            # queryset=models.VwTileValidate.objects.filter(datatype__in=["concept"]).filter(  # , "concept-list"]
+            #     ~Exists(
+            #         models.Value.objects.annotate(casted_pk=Cast("valueid", output_field=CharField())).filter(
+            #             casted_pk=Cast(OuterRef("nodevalue"), output_field=CharField())
+            #         )
+            #     ),
+            # ),
+            queryset=corrupt_tiles,
+            fix_action=None,
+        )
+
     def check_integrity(self, check, queryset, fix_action):
         # 500 not set as a default earlier: None distinguishes whether verbose output implied
         limit = self.options["limit"] or 500
@@ -100,7 +134,7 @@ class Command(BaseCommand):
         if self.mode == VALIDATE:
             # Fixable?
             fix_status = self.style.MIGRATE_HEADING("Yes") if fix_action else self.style.NOTICE("No")
-            if not queryset.exists():
+            if len(queryset):
                 fix_status = self.style.MIGRATE_HEADING("N/A")
         else:
             if not self.options["fix_all"] and check.value not in self.options["fix"]:
@@ -113,7 +147,7 @@ class Command(BaseCommand):
                     fix_status = self.style.MIGRATE_HEADING("N/A")
                 else:
                     raise CommandError(f"Requested fixing unfixable - {check.value}: {check}")
-            elif queryset.exists():
+            elif len(queryset):
                 fix_status = self.style.ERROR("No")  # until actually fixed below
                 # Perform fix action
                 if fix_action is DELETE_QUERYSET:
@@ -141,7 +175,10 @@ class Command(BaseCommand):
                 if queryset:
                     for i, n in enumerate(queryset):
                         if i < limit:
-                            self.stdout.write(f"\t{n.pk}")
+                            if False:  # check.value == 2000:
+                                self.stdout.write(f"Node: {n.nodeid} | Tile: {n.tileid} | Value: {n.nodevalue}")
+                            else:
+                                self.stdout.write(f"{n.pk}")
                         else:
                             self.stdout.write("\t\t(truncated...)")
                             break

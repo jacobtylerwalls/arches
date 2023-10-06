@@ -121,6 +121,7 @@ class Command(BaseCommand):
         concept_values_for_report = {}
         concept_nodes_for_report = {}
         with connection.cursor() as cursor:
+            # see view at bottom of file
             cursor.execute("SELECT nodeid, nodevalue, tileid from vw_tile_data_validate WHERE datatype IN ('concept', 'concept-list') AND nodevalue IS NOT NULL")
             results = cursor.fetchall()
             for result in results:
@@ -214,3 +215,28 @@ class Command(BaseCommand):
                             break
 
             self.stdout.write()
+
+
+# DROP VIEW public.vw_tile_data_validate;
+
+# CREATE OR REPLACE VIEW public.vw_tile_data_validate
+#  AS
+#  SELECT t.tileid || ' | '::text || tiledata.key AS tileid_nodeid,
+#     t.tileid,
+#     tiledata.key::uuid AS nodeid,
+#     n.datatype,
+# 	CASE
+# 		WHEN datatype in ('concept', 'domain-value') and tiledata.value::text <> 'null' THEN '['||tiledata.value::text||']'::text
+# 	ELSE
+# 	 	NULLIF (tiledata.value::text,'null')::text
+# 	END as nodevalue,
+
+#    '123'::text AS publicationid,
+#     n.isrequired,
+#     n.config
+#    FROM tiles t,
+#     LATERAL jsonb_each(t.tiledata) tiledata(key, value)
+#      JOIN nodes n ON n.nodeid = tiledata.key::uuid;
+
+# ALTER TABLE public.vw_tile_data_validate
+#     OWNER TO postgres;

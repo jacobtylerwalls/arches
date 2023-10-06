@@ -24,7 +24,7 @@ from arches.app.models import models
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from django.db.models import Exists, OuterRef
-from django.db.models.fields import CharField
+from django.db.models.fields import UUIDField
 from django.db.models.functions import Cast
 
 from django.db.models.fields.json import KT
@@ -98,21 +98,18 @@ class Command(BaseCommand):
         )
 
         concept_nodes = models.Node.objects.filter(datatype="concept")
-        values_annotated = models.Value.objects.annotate(casted_id=Cast("valueid", output_field=CharField())).values_list(
-            "casted_id", flat=True
-        )
-        corrupt_tile_pks = []
+        all_corrupt_tiles = None
         for concept_node in concept_nodes:
-            tiles_annotated = (
+            corrupt_tiles = (
                 models.TileModel.objects.filter(data__has_key=str(concept_node.pk))
-                .annotate(concept_value=KT(f"data__{str(concept_node.pk)}"))
+                .annotate(concept_value=Cast(KT(f"data__{str(concept_node.pk)}"), output_field=UUIDField()))
                 .filter(concept_value__isnull=False)
+                .exclude(Exists(models.Value.objects.filter(pk=OuterRef('concept_value'))))
             )
-            for tile in tiles_annotated:
-                if tile.concept_value not in values_annotated:
-                    corrupt_tile_pks.append(tile.pk)
-        corrupt_tiles = models.TileModel.objects.filter(pk__in=corrupt_tile_pks)
-        # corrupt_tiles = tiles_annotated.filter(~Exists(values_annotated.filter(casted_id=OuterRef("concept_value"))))
+            if all_corrupt_tiles is None:
+                all_corrupt_tiles = corrupt_tiles
+            else:
+                all_corrupt_tiles = all_corrupt_tiles | corrupt_tiles
 
         self.check_integrity(
             check=IntegrityCheck.TILE_STORING_NONEXISTENT_CONCEPT,  # 2000
@@ -123,7 +120,7 @@ class Command(BaseCommand):
             #         )
             #     ),
             # ),
-            queryset=corrupt_tiles,
+            queryset=all_corrupt_tiles,
             fix_action=None,
         )
 

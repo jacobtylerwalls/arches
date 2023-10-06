@@ -116,24 +116,29 @@ class Command(BaseCommand):
             else:
                 all_corrupt_tiles = all_corrupt_tiles | corrupt_tiles
 
-        annotated_tile_values = models.VwTileValidate.objects.filter(datatype='concept').annotate(valid_concepts = Func(F('nodeid'), function = '__arches_get_labels_for_concept_node'))
-
         corrupt_tile_ids = []
+        valid_concepts_for_nodes = {}
+        concept_values_for_report = {}
         with connection.cursor() as cursor:
             cursor.execute("SELECT nodeid, nodevalue, tileid from vw_tile_data_validate WHERE datatype IN ('concept', 'concept-list') AND nodevalue IS NOT NULL")
-            results = (cursor.fetchone(), ) # lhs: todo: get all
+            results = cursor.fetchall()
             for result in results:
                 nodeid, concept_values, tileid = result
                 stripped = concept_values[1:-1]  # stringified uuids!
                 split = stripped.split(',')
-                quotes_removed = [x.replace('"', '') for x in split]
+                quotes_removed = [x.replace('"', '').replace(' ', '') for x in split]
 
-                cursor.execute(f"SELECT valueid from __arches_get_labels_for_concept_node('{nodeid}')")
-                valid_concepts = cursor.fetchall()  ## need to aggregate results
+                try:
+                    valid_concepts = valid_concepts_for_nodes[nodeid]
+                except KeyError:
+                    cursor.execute(f"SELECT valueid from __arches_get_labels_for_concept_node('{nodeid}')")
+                    valid_concepts = cursor.fetchall()
+                    valid_concepts_for_nodes[nodeid] = valid_concepts
 
                 for concept_value in quotes_removed:
-                    if concept_value not in str(valid_concepts):
+                    if concept_value not in str(valid_concepts):  # todo: improve
                         corrupt_tile_ids.append(tileid)
+                        concept_values_for_report[tileid] = concept_value  # will overwrite
 
         self.check_integrity(
             check=IntegrityCheck.TILE_STORING_NONEXISTENT_CONCEPT,  # 2000
@@ -144,9 +149,10 @@ class Command(BaseCommand):
             check=IntegrityCheck.TILE_STORING_INVALID_CONCEPT,  # 2001
             queryset=models.TileModel.objects.filter(pk__in=corrupt_tile_ids),
             fix_action=None,
+            context_for_report=concept_values_for_report,
         )
 
-    def check_integrity(self, check, queryset, fix_action):
+    def check_integrity(self, check, queryset, fix_action, context_for_report=None):
         # 500 not set as a default earlier: None distinguishes whether verbose output implied
         limit = self.options["limit"] or 500
 
@@ -195,7 +201,9 @@ class Command(BaseCommand):
                     for i, row in enumerate(queryset):
                         if i < limit:
                             if check.value == 2000:
-                                self.stdout.write(f"Nodegroup: {row.nodegroup.pk} | Tile: {row.tileid} | Value: {row.concept_value}")
+                                self.stdout.write(f"Nodegroup: {row.nodegroup.pk} | Tile: {row.tileid} | Resource: {row.resourceinstance.graph.name}")
+                            elif check.value == 2001:
+                                self.stdout.write(f"Nodegroup: {row.nodegroup.pk} | Tile: {row.tileid} | Resource: {row.resourceinstance.graph.name} | Concept Value: {context_for_report[row.tileid]}")
                             else:
                                 self.stdout.write(f"{row.pk}")
                         else:

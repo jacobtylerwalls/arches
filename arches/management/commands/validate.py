@@ -24,6 +24,13 @@ from arches.app.models import models
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from django.db.models import Exists, OuterRef
+from django.db.models.fields import *
+from django.db.models.functions import Cast
+
+from django.db.models import Exists, OuterRef
+from django.db.models.fields import CharField
+from django.db.models.fields.json import KT
+from django.db.models.functions import Cast
 
 # Command modes
 FIX = "fix"
@@ -47,12 +54,17 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         choices = [check.value for check in IntegrityCheck]
 
-        parser.add_argument("--fix-all", action="store_true", dest="fix_all", default=False,
-                            help="Apply all fix actions.")
-        parser.add_argument("--fix", action="extend", nargs="+", type=int, default=[], choices=choices,
-                            help="List the error codes to fix, e.g. --fix 1001 1002 ...")
-        parser.add_argument("--limit", action="store", type=int,
-                            help="Maximum number of rows to print; does not affect fix actions")
+        parser.add_argument("--fix-all", action="store_true", dest="fix_all", default=False, help="Apply all fix actions.")
+        parser.add_argument(
+            "--fix",
+            action="extend",
+            nargs="+",
+            type=int,
+            default=[],
+            choices=choices,
+            help="List the error codes to fix, e.g. --fix 1001 1002 ...",
+        )
+        parser.add_argument("--limit", action="store", type=int, help="Maximum number of rows to print; does not affect fix actions")
 
     def handle(self, *args, **options):
         self.options = options
@@ -81,16 +93,34 @@ class Command(BaseCommand):
         # Add checks here in numerical order
         self.check_integrity(
             check=IntegrityCheck.NODE_HAS_ONTOLOGY_GRAPH_DOES_NOT,  # 1005
-            queryset=models.Node.objects.only("ontologyclass", "graph").filter(
-                ontologyclass__isnull=False).filter(graph__ontology=None),
+            queryset=models.Node.objects.only("ontologyclass", "graph").filter(ontologyclass__isnull=False).filter(graph__ontology=None),
             fix_action=None,
         )
         self.check_integrity(
             check=IntegrityCheck.NODELESS_NODE_GROUP,  # 1012
-            queryset=models.NodeGroup.objects.filter(
-                ~Exists(models.Node.objects.filter(nodegroup_id=OuterRef("nodegroupid")))
-            ),
+            queryset=models.NodeGroup.objects.filter(~Exists(models.Node.objects.filter(nodegroup_id=OuterRef("nodegroupid")))),
             fix_action=DELETE_QUERYSET,
+        )
+
+
+        # concept_nodes = models.Node.objects.filter(datatype="concept")
+        # for concept_node in concept_nodes:
+        #     tiles_annotated = models.TileModel.objects.filter(data__has_key=str(concept_node.pk)).annotate(concept_value=KT(f"data__{str(concept_node.pk)}")).filter(concept_value__isnull=False)
+        #     values_annotated = models.Value.objects.annotate(casted_id=Cast('valueid', output_field=CharField()))
+        #     corrupt_tiles = tiles_annotated.filter(~Exists(values_annotated.filter(casted_id=OuterRef('concept_value'))))
+        #     # for corrupt_tile in corrupt_tiles:
+        #     #     print("\t".join([f"node: {concept_node.pk}", f"tile: {corrupt_tile.pk}", f"bad value: {corrupt_tile.concept_value}"]))
+        self.check_integrity(
+            check=IntegrityCheck.TILE_STORING_NONEXISTENT_CONCEPT,  # 2000
+            queryset=models.VwTileValidate.objects.filter(datatype__in=["concept"]).filter(  # , "concept-list"]
+                ~Exists(
+                    models.Value.objects.annotate(casted_pk=Cast("valueid", output_field=UUIDField())).filter(
+                        casted_pk=Cast(OuterRef("nodevalue"), output_field=UUIDField())
+                    )
+                ),
+            ),
+            # queryset=corrupt_tiles,
+            fix_action=None,
         )
 
     def check_integrity(self, check, queryset, fix_action):
@@ -141,7 +171,10 @@ class Command(BaseCommand):
                 if queryset:
                     for i, n in enumerate(queryset):
                         if i < limit:
-                            self.stdout.write(f"\t{n.pk}")
+                            if check.value == 2000:
+                                self.stdout.write(f"Node: {n.nodeid} | Tile: {n.tileid} | Value: {n.nodevalue}")
+                            else:
+                                self.stdout.write(f"{n.pk}")
                         else:
                             self.stdout.write("\t\t(truncated...)")
                             break

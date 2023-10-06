@@ -1646,6 +1646,20 @@ class VwAnnotation(models.Model):
         managed = False
         db_table = "vw_annotations"
 
+class VwTileValidate(models.Model):
+    tileid_nodeid = models.UUIDField(primary_key=True)
+    tileid = models.UUIDField()
+    nodeid = models.UUIDField()
+    datatype = models.TextField()
+    nodevalue = models.TextField()
+    publicationid = models.TextField() #TODO Implement this as UUID models.UUIDField(default=None)
+    isrequired = models.BooleanField(default=False)
+    config = JSONField(blank=True, null=True, db_column="config")
+
+    class Meta:
+        managed = False
+        db_table = "vw_tile_data_validate"
+
 
 class GeoJSONGeometry(models.Model):
     tile = models.ForeignKey(TileModel, on_delete=models.CASCADE, db_column="tileid")

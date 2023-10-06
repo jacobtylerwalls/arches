@@ -4,8 +4,8 @@ from enum import Enum, unique
 IntegrityCheckDescriptions = {
     1005: "Nodes with ontologies found in graphs without ontologies",
     1012: "Node Groups without matching nodes",
-    2000: "Tiles storing nonexistent concept values",
-    2001: "Tiles storing invalid concept values",
+    2000: "Concept nodes storing nonexistent values",
+    2001: "Concept nodes storing invalid values",
 }
 
 @unique

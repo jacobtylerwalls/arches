@@ -119,6 +119,7 @@ class Command(BaseCommand):
         corrupt_tile_ids = []
         valid_concepts_for_nodes = {}
         concept_values_for_report = {}
+        concept_nodes_for_report = {}
         with connection.cursor() as cursor:
             cursor.execute("SELECT nodeid, nodevalue, tileid from vw_tile_data_validate WHERE datatype IN ('concept', 'concept-list') AND nodevalue IS NOT NULL")
             results = cursor.fetchall()
@@ -139,6 +140,7 @@ class Command(BaseCommand):
                     if concept_value not in str(valid_concepts):  # todo: improve
                         corrupt_tile_ids.append(tileid)
                         concept_values_for_report[tileid] = concept_value  # will overwrite
+                        concept_nodes_for_report[tileid] = nodeid  # will overwrite
 
         self.check_integrity(
             check=IntegrityCheck.TILE_STORING_NONEXISTENT_CONCEPT,  # 2000
@@ -150,9 +152,10 @@ class Command(BaseCommand):
             queryset=models.TileModel.objects.filter(pk__in=corrupt_tile_ids),
             fix_action=None,
             context_for_report=concept_values_for_report,
+            context_for_report_2=concept_nodes_for_report,
         )
 
-    def check_integrity(self, check, queryset, fix_action, context_for_report=None):
+    def check_integrity(self, check, queryset, fix_action, context_for_report=None, context_for_report_2=None):  # lol...
         # 500 not set as a default earlier: None distinguishes whether verbose output implied
         limit = self.options["limit"] or 500
 
@@ -203,7 +206,7 @@ class Command(BaseCommand):
                             if check.value == 2000:
                                 self.stdout.write(f"Nodegroup: {row.nodegroup.pk} | Tile: {row.tileid} | Resource: {row.resourceinstance.graph.name}")
                             elif check.value == 2001:
-                                self.stdout.write(f"Nodegroup: {row.nodegroup.pk} | Tile: {row.tileid} | Resource: {row.resourceinstance.graph.name} | Concept Value: {context_for_report[row.tileid]}")
+                                self.stdout.write(f"Node: {context_for_report_2[row.tileid]} | Tile: {row.tileid} | Resource: {row.resourceinstance.graph.name} | Orphaned Concept Value: {context_for_report[row.tileid]}")
                             else:
                                 self.stdout.write(f"{row.pk}")
                         else:

@@ -103,7 +103,7 @@ class Command(BaseCommand):
         )
 
         concept_nodes = models.Node.objects.filter(datatype="concept")
-        all_corrupt_tiles = None
+        all_corrupt_tiles = models.TileModel.objects.none()
         for concept_node in concept_nodes:
             corrupt_tiles = (
                 models.TileModel.objects.filter(data__has_key=str(concept_node.pk))
@@ -111,10 +111,7 @@ class Command(BaseCommand):
                 .filter(concept_value__isnull=False)
                 .exclude(Exists(models.Value.objects.filter(pk=OuterRef('concept_value'))))
             )
-            if all_corrupt_tiles is None:
-                all_corrupt_tiles = corrupt_tiles
-            else:
-                all_corrupt_tiles = all_corrupt_tiles | corrupt_tiles
+            all_corrupt_tiles = all_corrupt_tiles | corrupt_tiles
 
         self.check_integrity(
             check=IntegrityCheck.TILE_STORING_NONEXISTENT_CONCEPT,  # 2000

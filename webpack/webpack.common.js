@@ -305,7 +305,7 @@ module.exports = () => {
                 module: {
                     rules: [
                         {
-                            test: /\.tsx?$/,
+                            test: /\.m?tsx?$/,
                             exclude: /node_modules/,
                             loader: Path.join(PROJECT_RELATIVE_NODE_MODULES_PATH, 'ts-loader'),
                             options: {
@@ -319,12 +319,7 @@ module.exports = () => {
                             loader: Path.join(PROJECT_RELATIVE_NODE_MODULES_PATH, 'vue-loader'),
                         },
                         {
-                            test: /\.mjs$/,
-                            exclude: /node_modules/,
-                            type: 'javascript/auto',
-                        },
-                        {
-                            test: /\.js$/,
+                            test: /\.m?js$/,
                             exclude: [/node_modules/, /load-component-dependencies/],
                             loader: Path.join(PROJECT_RELATIVE_NODE_MODULES_PATH, 'babel-loader'),
                             options: {

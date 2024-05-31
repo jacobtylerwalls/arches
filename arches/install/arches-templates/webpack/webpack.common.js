@@ -324,7 +324,7 @@ module.exports = () => {
                             type: 'javascript/auto',
                         },
                         {
-                            test: /\.js$/,
+                            test: /\.m?js$/,
                             exclude: [/node_modules/, /load-component-dependencies/],
                             loader: Path.join(PROJECT_RELATIVE_NODE_MODULES_PATH, 'babel-loader'),
                             options: {

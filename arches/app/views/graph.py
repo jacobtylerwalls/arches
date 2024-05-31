@@ -432,10 +432,7 @@ class GraphDataView(View):
                     clone_data["copy"].slug = None
                     clone_data["copy"].save()
 
-                    clone_data['copy'].create_editable_future_graph()
-                    clone_data['copy'].publish()
-
-                    ret = {"success": True, "graphid": clone_data['copy'].pk}
+                    ret = {"success": True, "graphid": clone_data["copy"].pk}
 
                 elif self.action == "clone_graph":
                     if graph.source_identifier:
@@ -444,10 +441,13 @@ class GraphDataView(View):
                     clone_data = graph.copy()
                     ret = clone_data["copy"]
                     ret.slug = None
+                    ret.publication = None
+
                     ret.save()
 
-                    ret.create_editable_future_graph()
-                    ret.publish()
+                    if bool(graph.publication_id):
+                        ret.publish(user=request.user)
+
                     ret.copy_functions(graph, [clone_data["nodes"], clone_data["nodegroups"]])
 
                 elif self.action == "reorder_nodes":

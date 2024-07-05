@@ -69,8 +69,7 @@ jobs:
 
       - name: Check line endings
         run: |
-          git ls-files --eol | grep 'w/crlf'
-          git ls-files --eol | grep 'w/mixed'
+          ! git ls-files --eol | grep 'w/crlf\|w/mixed'
 
       - name: Run frontend tests
         run: |

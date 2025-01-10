@@ -245,11 +245,13 @@ class ResourceInstanceQuerySet(QuerySet):
                     lhs="pk",
                     outer_ref="tileid",
                     as_representation=as_representation,
-                ).annotate(
+                )
+                .annotate(
                     cardinality=NodeGroup.objects.filter(
                         pk=OuterRef("nodegroup_id")
                     ).values("cardinality")
-                ),
+                )
+                .select_related("parenttile"),
                 to_attr="_annotated_tiles",
             ),
         ).annotate(**node_alias_annotations)
@@ -296,8 +298,18 @@ class ResourceInstanceQuerySet(QuerySet):
                 else:
                     setattr(resource, ng_alias, annotated_tile)
 
+                # Attach parent to this child.
+                if annotated_tile.parenttile_id:
+                    setattr(
+                        annotated_tile,
+                        annotated_tile.parenttile.nodegroup_alias,
+                        self._find_parent_tile_from_annotated_tiles(
+                            annotated_tile, annotated_tiles
+                        ),
+                    )
+
+                # Attach children to this parent.
                 for child_tile in annotated_tile.children.all():
-                    setattr(child_tile, ng_alias, child_tile.parenttile)
                     children = getattr(annotated_tile, child_tile.nodegroup_alias, [])
                     if child_tile not in children:
                         children.append(child_tile)
@@ -308,3 +320,14 @@ class ResourceInstanceQuerySet(QuerySet):
         ret._fetched_nodes = self._fetched_nodes
         ret._as_representation = self._as_representation
         return ret
+
+    @staticmethod
+    def _find_parent_tile_from_annotated_tiles(child_tile, annotated_tiles):
+        """This search avoids using the parenttile python instance instantiated
+        by Django so that users can crawl the semantic aliases bidirectionally:
+
+        >>> child.parent_alias.children_alias[0].parent_alias.children_alias[0]...
+        """
+        for other_annotated_tile in annotated_tiles:
+            if other_annotated_tile == child_tile.parenttile:
+                return other_annotated_tile

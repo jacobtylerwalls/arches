@@ -293,7 +293,7 @@ class ResourceInstanceQuerySet(QuerySet):
                 if annotated_tile.cardinality == "n":
                     tile_array = getattr(resource, ng_alias)
                     tile_array.append(annotated_tile)
-                elif root_node.nodegroup.parentnodegroup_id is None:
+                else:
                     setattr(resource, ng_alias, annotated_tile)
 
                 for child_tile in annotated_tile.children.all():

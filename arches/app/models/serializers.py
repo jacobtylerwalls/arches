@@ -19,7 +19,7 @@ renderers.JSONOpenAPIRenderer.encoder_class = JSONSerializer
 class ArchesTileSerializer(serializers.ModelSerializer):
     tileid = serializers.UUIDField(validators=[], required=False)
     resourceinstance = serializers.PrimaryKeyRelatedField(
-        queryset=ResourceInstance.objects.all(), html_cutoff=10
+        queryset=ResourceInstance.objects.all(), required=False, html_cutoff=10
     )
 
     def __init__(self, instance=None, data=fields.empty, **kwargs):

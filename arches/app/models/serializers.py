@@ -1,5 +1,6 @@
 from copy import deepcopy
 
+from django.db import transaction
 from django.db.models import F
 from rest_framework.exceptions import ValidationError
 from rest_framework import fields
@@ -104,9 +105,11 @@ class ArchesTileSerializer(serializers.ModelSerializer):
         )
         qs.first()
         validated_data["nodegroup_id"] = qs._fetched_nodes[0].nodegroup_id
-        blank_tile = super().create(validated_data)
-        tile_from_factory = qs.get(pk=blank_tile.pk)
-        return self.update(tile_from_factory, validated_data)
+        with transaction.atomic():
+            blank_tile = super().create(validated_data)
+            tile_from_factory = qs.get(pk=blank_tile.pk)
+            updated = self.update(tile_from_factory, validated_data)
+        return updated
 
 
 class ArchesModelSerializer(serializers.ModelSerializer):
@@ -182,10 +185,12 @@ class ArchesModelSerializer(serializers.ModelSerializer):
         meta = self.__class__.Meta
         # TODO: we probably want a queryset method to do one-shot
         # creates with tile data
-        instance_without_tile_data = super().create(validated_data)
-        instance_from_factory = meta.model.as_model(
-            graph_slug=self.__class__.Meta.graph_slug,
-            only=None if meta.nodegroups == "__all__" else meta.nodegroups,
-        ).get(pk=instance_without_tile_data.pk)
-        instance_from_factory._as_representation = True
-        return self.update(instance_from_factory, validated_data)
+        with transaction.atomic():
+            instance_without_tile_data = super().create(validated_data)
+            instance_from_factory = meta.model.as_model(
+                graph_slug=self.__class__.Meta.graph_slug,
+                only=None if meta.nodegroups == "__all__" else meta.nodegroups,
+            ).get(pk=instance_without_tile_data.pk)
+            instance_from_factory._as_representation = True
+            updated = self.update(instance_from_factory, validated_data)
+        return updated

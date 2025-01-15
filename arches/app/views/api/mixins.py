@@ -3,6 +3,7 @@ from itertools import chain
 
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework.exceptions import PermissionDenied, ValidationError
+from rest_framework.metadata import SimpleMetadata
 
 from arches.app.models.models import ResourceInstance, TileModel
 from arches.app.utils.permission_backend import (
@@ -12,7 +13,19 @@ from arches.app.utils.permission_backend import (
 )
 
 
+class MetadataWithInitial(SimpleMetadata):
+    def get_field_info(self, field):
+        return {
+            **super().get_field_info(field),
+            "initial": (
+                None if field.initial is field.default_empty_html else field.initial
+            ),
+        }
+
+
 class ArchesModelAPIMixin:
+    metadata_class = MetadataWithInitial
+
     def get_queryset(self):
         fields = self.serializer_class.Meta.fields
         if fields == "__all__":

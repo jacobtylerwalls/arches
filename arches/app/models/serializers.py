@@ -1,5 +1,6 @@
 from copy import deepcopy
 
+from django.core.exceptions import MultipleObjectsReturned, ObjectDoesNotExist
 from django.db import transaction
 from django.db.models import F
 from rest_framework.exceptions import ValidationError
@@ -7,6 +8,7 @@ from rest_framework import fields
 from rest_framework import renderers
 from rest_framework import serializers
 
+from arches.app.models.fields.i18n import I18n_JSON, I18n_String
 from arches.app.datatypes.datatypes import DataTypeFactory
 from arches.app.models.models import Node, ResourceInstance, TileModel
 from arches.app.utils.betterJSONSerializer import JSONSerializer
@@ -76,8 +78,27 @@ class ArchesTileSerializer(serializers.ModelSerializer):
             raise NotImplementedError(f"Field missing for datatype: {node.datatype}")
         model_field.model = model_class
         model_field.blank = not node.isrequired
+        try:
+            cross = node.cardxnodexwidget_set.get()
+            label = cross.label
+            config = cross.config
+        except (ObjectDoesNotExist, MultipleObjectsReturned):
+            label = I18n_String()
+            config = I18n_JSON()
 
-        return self.build_standard_field(field_name, model_field)
+        ret = self.build_standard_field(field_name, model_field)
+        ret[1]["required"] = node.isrequired
+        try:
+            ret[1]["initial"] = config.serialize().get("defaultValue", {})
+        except KeyError:
+            pass
+        try:
+            ret[1]["help_text"] = config.serialize().get("placeholder", None)
+        except KeyError:
+            pass
+        ret[1]["label"] = label.serialize()
+
+        return ret
 
     def build_relational_field(self, field_name, relation_info):
         ret = super().build_relational_field(field_name, relation_info)

@@ -21,9 +21,6 @@ renderers.JSONOpenAPIRenderer.encoder_class = JSONSerializer
 
 class ArchesTileSerializer(serializers.ModelSerializer):
     tileid = serializers.UUIDField(validators=[], required=False)
-    resourceinstance = serializers.PrimaryKeyRelatedField(
-        queryset=ResourceInstance.objects.all(), required=False, html_cutoff=10
-    )
 
     def __init__(self, instance=None, data=fields.empty, **kwargs):
         super().__init__(instance, data, **kwargs)
@@ -102,6 +99,12 @@ class ArchesTileSerializer(serializers.ModelSerializer):
 
     def build_relational_field(self, field_name, relation_info):
         ret = super().build_relational_field(field_name, relation_info)
+        if field_name == "resourceinstance":
+            ret[1]["queryset"] = ret[1]["queryset"].with_nodegroups(
+                self.Meta.graph_slug
+            )
+            ret[1]["required"] = False
+            ret[1]["html_cutoff"] = 25
         if field_name == "parenttile":
             ret[1]["queryset"] = ret[1]["queryset"].filter(
                 nodegroup_id=self._root_node.nodegroup.parentnodegroup_id

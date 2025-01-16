@@ -214,6 +214,7 @@ class ResourceInstanceQuerySet(QuerySet):
         try:
             # Prefetch sibling nodes for use in _prefetch_related_objects()
             # and generate_tile_annotations().
+            # TODO: avoid doing a query here.
             source_graph = graph_query.prefetch_related(
                 "node_set__nodegroup__node_set"
             ).get()

@@ -2046,15 +2046,19 @@ class TileModel(models.Model):  # Tile
         from arches.app.models.resource import Resource
         from arches.app.models.tile import Tile
 
-        should_save = self._update_tile_from_pythonic_model_values()
-        if not should_save:
-            return
+        tile_data_changed = self._update_tile_from_pythonic_model_values()
+        if not tile_data_changed:
+            # TODO: double-check whether some user guard makes sense here.
+            # And whether indexing needs to run.
+            return super().save(**kwargs)
 
         # Instantiate a proxy model and sync data to it, to run all side effects.
         # Explanation: this is basically Tile.save() but with the serialized
         # graph and tile fetching skipped. Hence why we might
         # TODO: expose on vanilla model.
         proxy = Tile.objects.get(pk=self.pk)
+        proxy.parenttile = self.parenttile
+        proxy.sortorder = self.sortorder
         # TODO: handle create.
         # Capture these to avoid re-querying in _apply_provisional_edit().
         existing_data = proxy.data
@@ -2158,10 +2162,6 @@ class TileModel(models.Model):  # Tile
         given the current implementation that doesn't serialize them."""
         from arches.app.datatypes.datatypes import DataTypeFactory
 
-        # TODO: this currently prevents you from being able to *only*
-        # change parenttile and sortorder, but at least for sortorder
-        # that's probably good. Determine DX here.
-
         datatype_factory = DataTypeFactory()
         # TODO: address performance
         for node in self.nodegroup.node_set.all():
@@ -2242,7 +2242,10 @@ class TileModel(models.Model):  # Tile
                     self._fetched_root_nodes, self.nodegroup_id
                 ).alias,
                 graph_slug=self.resourceinstance.graph.slug,
-                only=aliases,
+                # TODO: re-enable only after finding out where
+                # to filter down _fetched_nodes so that it only
+                # contains this tile's nodes and below.
+                # only=aliases,
             )
             super().refresh_from_db(using, fields, from_queryset)
             # Copy over annotations.

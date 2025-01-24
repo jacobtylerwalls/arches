@@ -1658,7 +1658,7 @@ class ResourceInstance(models.Model):
                 self.graph.slug,
                 only=aliases,
                 as_representation=getattr(self, "_as_representation", False),
-            )
+            ).filter(pk=self.pk)
             super().refresh_from_db(using, fields, from_queryset)
             # Copy over annotations and annotated tiles.
             refreshed_resource = from_queryset[0]

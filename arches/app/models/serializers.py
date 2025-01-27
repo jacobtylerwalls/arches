@@ -10,7 +10,7 @@ from rest_framework import serializers
 
 from arches.app.models.fields.i18n import I18n_JSON, I18n_String
 from arches.app.datatypes.datatypes import DataTypeFactory
-from arches.app.models.models import Node, ResourceInstance, TileModel
+from arches.app.models.models import Node, TileModel
 from arches.app.utils.betterJSONSerializer import JSONSerializer
 
 
@@ -78,9 +78,11 @@ class ArchesTileSerializer(serializers.ModelSerializer):
         try:
             cross = node.cardxnodexwidget_set.get()
             label = cross.label
+            visible = cross.visible
             config = cross.config
         except (ObjectDoesNotExist, MultipleObjectsReturned):
             label = I18n_String()
+            visible = True
             config = I18n_JSON()
 
         ret = self.build_standard_field(field_name, model_field)
@@ -94,6 +96,7 @@ class ArchesTileSerializer(serializers.ModelSerializer):
         except KeyError:
             pass
         ret[1]["label"] = label.serialize()
+        ret[1]["style"] = {"visible": visible}
 
         return ret
 

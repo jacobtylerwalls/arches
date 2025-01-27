@@ -20,6 +20,7 @@ class MetadataWithInitial(SimpleMetadata):
             "initial": (
                 None if field.initial is field.default_empty_html else field.initial
             ),
+            "visible": field.style.get("visible", False),
         }
 
 

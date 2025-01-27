@@ -13,7 +13,7 @@ from arches.app.utils.permission_backend import (
 )
 
 
-class MetadataWithInitial(SimpleMetadata):
+class MetadataWithWidgetConfig(SimpleMetadata):
     def get_field_info(self, field):
         return {
             **super().get_field_info(field),
@@ -21,11 +21,13 @@ class MetadataWithInitial(SimpleMetadata):
                 None if field.initial is field.default_empty_html else field.initial
             ),
             "visible": field.style.get("visible", False),
+            "datatype": field.style.get("datatype", None),
+            "widget_config": field.style.get("widget_config", {}),
         }
 
 
 class ArchesModelAPIMixin:
-    metadata_class = MetadataWithInitial
+    metadata_class = MetadataWithWidgetConfig
 
     def get_queryset(self):
         fields = self.serializer_class.Meta.fields

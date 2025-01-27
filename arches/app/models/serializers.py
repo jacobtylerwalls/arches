@@ -82,7 +82,7 @@ class ArchesTileSerializer(serializers.ModelSerializer):
             config = cross.config
         except (ObjectDoesNotExist, MultipleObjectsReturned):
             label = I18n_String()
-            visible = True
+            visible = False
             config = I18n_JSON()
 
         ret = self.build_standard_field(field_name, model_field)
@@ -96,7 +96,11 @@ class ArchesTileSerializer(serializers.ModelSerializer):
         except KeyError:
             pass
         ret[1]["label"] = label.serialize()
-        ret[1]["style"] = {"visible": visible}
+        ret[1]["style"] = {
+            "visible": visible,
+            "widget_config": config,
+            "datatype": node.datatype,
+        }
 
         return ret
 

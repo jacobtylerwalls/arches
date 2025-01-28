@@ -24,6 +24,7 @@ from django.utils.translation import get_language, gettext as _
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.core.files.base import ContentFile
 from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.debug import sensitive_variables
 from django.utils import translation
 from django.utils.decorators import method_decorator
 from django_ratelimit.decorators import ratelimit
@@ -136,9 +137,8 @@ class GetFrontendI18NData(APIBase):
         localized_strings = {}
         for lang_file in language_file_path:
             try:
-                localized_strings = (
-                    json.load(open(lang_file))[user_language] | localized_strings
-                )
+                with open(lang_file, "r", encoding="utf-8") as f:
+                    localized_strings = json.load(f)[user_language] | localized_strings
             except FileNotFoundError:
                 pass
 
@@ -1128,6 +1128,7 @@ class Plugins(View):
 
 
 class SearchExport(View):
+    @sensitive_variables("user_cred")
     @method_decorator(
         ratelimit(
             key="header:http-authorization", rate=settings.RATE_LIMIT, block=False
@@ -1447,7 +1448,9 @@ class ResourceReport(APIBase):
             get_params.update({"paginate": "false"})
             request.GET = get_params
 
-            related_resources_response = RelatedResourcesView().get(request, resourceid)
+            related_resources_response = RelatedResourcesView().get(
+                request, resourceid, include_rr_count=False
+            )
             related_resources = json.loads(related_resources_response.content)
 
             related_resources_summary = self._generate_related_resources_summary(

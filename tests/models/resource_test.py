@@ -392,7 +392,7 @@ class ResourceTests(ArchesTestCase):
         test_resource = Resource(graph_id=self.search_model_graphid)
         test_resource.save(user=user)
         perms = set(get_perms(user, test_resource))
-        self.assertEqual(
+        self.assertNotEqual(
             perms,
             {
                 "view_resourceinstance",
@@ -400,6 +400,7 @@ class ResourceTests(ArchesTestCase):
                 "delete_resourceinstance",
             },
         )
+        self.assertEqual(test_resource.principaluser, user)
 
     def test_provisional_user_can_delete_own_resource(self):
         """
@@ -490,6 +491,7 @@ class ResourceTests(ArchesTestCase):
         graph = Graph.new(name="Self-referring descriptor test", is_resource=True)
         nodegroup = models.NodeGroup.objects.create()
         string_node = models.Node.objects.create(
+            pk=nodegroup.pk,
             graph=graph,
             nodegroup=nodegroup,
             name="String Node",
@@ -503,6 +505,8 @@ class ResourceTests(ArchesTestCase):
             datatype="resource-instance",
             istopnode=False,
         )
+        nodegroup.grouping_node = string_node
+        nodegroup.save()
 
         # Configure the primary descriptor to use the string node
         models.FunctionXGraph.objects.create(

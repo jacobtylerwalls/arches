@@ -94,11 +94,11 @@ class CardModel(models.Model):
         if isinstance(self.cardid, str):
             self.cardid = uuid.UUID(self.cardid)
 
-    def save(self, *args, **kwargs):
+    def save(self, **kwargs):
         if self.pk == self.source_identifier_id:
             self.source_identifier_id = None
             add_to_update_fields(kwargs, "source_identifier_id")
-        super(CardModel, self).save()
+        super(CardModel, self).save(**kwargs)
 
     class Meta:
         managed = True
@@ -183,11 +183,11 @@ class CardXNodeXWidget(models.Model):
         if not self.id:
             self.id = uuid.uuid4()
 
-    def save(self, *args, **kwargs):
+    def save(self, **kwargs):
         if self.pk == self.source_identifier_id:
             self.source_identifier_id = None
             add_to_update_fields(kwargs, "source_identifier_id")
-        super(CardXNodeXWidget, self).save()
+        super(CardXNodeXWidget, self).save(**kwargs)
 
     class Meta:
         managed = True
@@ -307,11 +307,11 @@ class Edge(models.Model):
         if isinstance(self.edgeid, str):
             self.edgeid = uuid.UUID(self.edgeid)
 
-    def save(self, *args, **kwargs):
+    def save(self, **kwargs):
         if self.pk == self.source_identifier_id:
             self.source_identifier_id = None
             add_to_update_fields(kwargs, "source_identifier_id")
-        super(Edge, self).save()
+        super(Edge, self).save(**kwargs)
 
     class Meta:
         managed = True
@@ -420,9 +420,9 @@ class File(models.Model):
         if not self.fileid:
             self.fileid = uuid.uuid4()
 
-    def save(self, *args, **kwargs):
+    def save(self, **kwargs):
         self.make_thumbnail(kwargs)
-        super(File, self).save(*args, **kwargs)
+        super(File, self).save(**kwargs)
 
     def make_thumbnail(self, kwargs_from_save_call, force=False):
         try:
@@ -595,7 +595,7 @@ class GraphModel(models.Model):
 
         return graph
 
-    def save(self, *args, **kwargs):
+    def save(self, **kwargs):
         if (
             self.isresource
             and not self.source_identifier
@@ -606,7 +606,7 @@ class GraphModel(models.Model):
             )
             add_to_update_fields(kwargs, "resource_instance_lifecycle_id")
 
-        super(GraphModel, self).save(*args, **kwargs)
+        super(GraphModel, self).save(**kwargs)
 
     def __str__(self):
         return str(self.name)
@@ -704,7 +704,9 @@ class Language(models.Model):
 class NodeGroup(models.Model):
     nodegroupid = models.UUIDField(primary_key=True)
     legacygroupid = models.TextField(blank=True, null=True)
-    cardinality = models.TextField(blank=True, default="1")
+    cardinality = models.CharField(
+        max_length=1, blank=True, default="1", choices={"1": "1", "n": "n"}
+    )
     parentnodegroup = models.ForeignKey(
         "self",
         db_column="parentnodegroupid",
@@ -714,6 +716,15 @@ class NodeGroup(models.Model):
         related_name="children",
         related_query_name="child",
     )  # Allows nodegroups within nodegroups
+    grouping_node = models.OneToOneField(
+        "Node",
+        db_column="groupingnodeid",
+        blank=True,
+        null=True,
+        # models.RESTRICT might be better, but revisit after future graph refactor.
+        on_delete=models.SET_NULL,
+        related_name="grouping_node_nodegroup",
+    )
 
     def __init__(self, *args, **kwargs):
         super(NodeGroup, self).__init__(*args, **kwargs)
@@ -723,6 +734,13 @@ class NodeGroup(models.Model):
     class Meta:
         managed = True
         db_table = "node_groups"
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(grouping_node=models.F("pk"))
+                | Q(grouping_node__isnull=True),
+                name="grouping_node_matches_pk_or_null",
+            )
+        ]
 
         default_permissions = ()
         permissions = (
@@ -871,16 +889,19 @@ class Node(models.Model):
     def clean(self):
         if not self.alias:
             Graph.objects.get(pk=self.graph_id).create_node_alias(self)
+        if self.pk == self.source_identifier_id:
+            self.source_identifier_id = None
 
     def save(self, **kwargs):
         if not self.alias:
-            self.clean()
             add_to_update_fields(kwargs, "alias")
             add_to_update_fields(kwargs, "hascustomalias")
         if self.pk == self.source_identifier_id:
-            self.source_identifier_id = None
             add_to_update_fields(kwargs, "source_identifier_id")
-        super(Node, self).save()
+
+        self.clean()
+
+        super(Node, self).save(**kwargs)
 
     class Meta:
         managed = True
@@ -891,6 +912,10 @@ class Node(models.Model):
             ),
             models.UniqueConstraint(
                 fields=["alias", "graph"], name="unique_alias_graph"
+            ),
+            models.CheckConstraint(
+                condition=Q(istopnode=True) | Q(nodegroup__isnull=False),
+                name="has_nodegroup_or_istopnode",
             ),
         ]
 
@@ -1175,7 +1200,7 @@ class ResourceXResource(models.Model):
 
         super(ResourceXResource, self).delete()
 
-    def save(self, *args, **kwargs):
+    def save(self, **kwargs):
         # during package/csv load the ResourceInstance models are not always available
         try:
             self.resourceinstancefrom_graphid = self.resourceinstanceidfrom.graph
@@ -1193,7 +1218,7 @@ class ResourceXResource(models.Model):
         self.modified = datetime.datetime.now()
         add_to_update_fields(kwargs, "modified")
 
-        super(ResourceXResource, self).save(*args, **kwargs)
+        super(ResourceXResource, self).save(**kwargs)
 
     def __init__(self, *args, **kwargs):
         super(ResourceXResource, self).__init__(*args, **kwargs)
@@ -1941,7 +1966,10 @@ class TileModel(models.Model):  # Tile
             self.tileid = uuid.uuid4()
 
     def __repr__(self):
-        return f"<{self.nodegroup_alias} ({self.pk})>"
+        alias = None
+        if self.nodegroup and self.nodegroup.grouping_node:
+            alias = self.nodegroup.grouping_node.alias
+        return f"<{alias} ({self.pk})>"
 
     def __str__(self):
         return repr(self)

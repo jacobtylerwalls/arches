@@ -45,7 +45,6 @@ from arches.app.utils.label_based_graph_v2 import LabelBasedGraph as LabelBasedG
 from arches.app.utils.permission_backend import (
     assign_perm,
     remove_perm,
-    NotUserNorGroup,
 )
 from arches.app.utils.betterJSONSerializer import JSONSerializer, JSONDeserializer
 from arches.app.utils.exceptions import (
@@ -304,15 +303,6 @@ class Resource(models.ResourceInstance):
                 transaction_id=transaction_id,
                 context=context,
             )
-        try:
-            for perm in (
-                "view_resourceinstance",
-                "change_resourceinstance",
-                "delete_resourceinstance",
-            ):
-                assign_perm(perm, user, self)
-        except NotUserNorGroup:
-            pass
 
         if index is True:
             self.index(context)
@@ -816,6 +806,7 @@ class Resource(models.ResourceInstance):
         user=None,
         resourceinstance_graphid=None,
         graphs=None,
+        include_rr_count=True,
     ):
         """
         Returns an object that lists the related resources, the relationship types, and a reference to the current resource
@@ -906,6 +897,7 @@ class Resource(models.ResourceInstance):
 
         ret["total"] = {"value": resource_relations["total"]}
         instanceids = set()
+        preflabel_lookup = dict()
 
         readable_graphids = set(
             permission_backend.get_resource_types_by_perm(
@@ -942,9 +934,18 @@ class Resource(models.ResourceInstance):
                 and str(resourceinstancefrom_graphid) in readable_graphids
             ):
                 try:
-                    preflabel = get_preflabel_from_valueid(
-                        relation["relationshiptype"], lang
-                    )
+                    if f'{relation["relationshiptype"]}{lang}' in preflabel_lookup:
+                        preflabel = preflabel_lookup[
+                            f'{relation["relationshiptype"]}{lang}'
+                        ]
+                    else:
+                        preflabel = get_preflabel_from_valueid(
+                            relation["relationshiptype"], lang
+                        )
+                        preflabel_lookup[f'{relation["relationshiptype"]}{lang}'] = (
+                            preflabel
+                        )
+
                     relation["relationshiptype_label"] = preflabel["value"] or ""
                 except:
                     relation["relationshiptype_label"] = (
@@ -965,13 +966,14 @@ class Resource(models.ResourceInstance):
             if related_resources:
                 for resource in related_resources["docs"]:
                     if resource["found"]:
-                        rel_count = get_relations(
-                            resourceinstanceid=resource["_id"],
-                            start=0,
-                            limit=0,
-                            count_only=True,
-                        )
-                        resource["_source"]["total_relations"] = rel_count
+                        if include_rr_count:
+                            rel_count = get_relations(
+                                resourceinstanceid=resource["_id"],
+                                start=0,
+                                limit=0,
+                                count_only=True,
+                            )
+                            resource["_source"]["total_relations"] = rel_count
                         for descriptor_type in ("displaydescription", "displayname"):
                             descriptor = get_localized_descriptor(
                                 resource, descriptor_type

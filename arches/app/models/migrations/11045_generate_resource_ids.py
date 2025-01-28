@@ -7,7 +7,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("models", "11044_make_further_fields_blank"),
+        ("models", "11725_make_tiledata_not_nullable"),
     ]
 
     operations = [

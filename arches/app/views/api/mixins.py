@@ -35,7 +35,7 @@ class ArchesModelAPIMixin:
         if not options.graph_slug and (graph_slug := self.kwargs.get("graph", None)):
             unsafe_methods = {"DELETE", "POST", "PUT", "PATCH"}
             if self.request.method in unsafe_methods and graph_slug in getattr(
-                options.read_only_graphs, {}
+                options, "read_only_graphs", {}
             ):
                 msg = _("{graph} is read-only".format(graph=graph_slug))
                 # Rely on future core arches work to transform to BAD_REQUEST json.
@@ -46,15 +46,17 @@ class ArchesModelAPIMixin:
             self.graph_slug = options.graph_slug
 
         # TODO: a bit of simplification/param renaming here.
-        if getattr(options, "nodegroups", None) == "__all__":
-            if nodegroup := self.kwargs.get("nodegroup", None):
-                self.only = [nodegroup]
-            else:
-                self.only = None
-        elif getattr(options, "root_node", None):
-            self.only = [options.root_node]
-        else:
+        if issubclass(options.model, ResourceInstance):
             self.only = options.nodegroups
+            if options.nodegroups == "__all__":
+                if nodegroup_alias := kwargs.get("nodegroup_alias", None):
+                    self.only = [nodegroup_alias]
+                else:
+                    self.only = None
+        else:
+            self.only = [options.root_node]
+            if options.root_node is None:
+                self.only = [kwargs["nodegroup_alias"]]
 
         return super().dispatch(*args, **kwargs)
 
@@ -70,7 +72,7 @@ class ArchesModelAPIMixin:
             )
         if issubclass(options.model, TileModel):
             return options.model.as_nodegroup(
-                options.root_node,
+                self.only[0],
                 graph_slug=self.graph_slug,
                 only=fields,
                 as_representation=True,

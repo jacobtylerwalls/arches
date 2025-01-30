@@ -32,19 +32,25 @@ class ArchesTileSerializer(serializers.ModelSerializer):
     def graph_slug(self):
         return self.context["graph_slug"]
 
+    @property
+    def only(self):
+        return self.context["only"]
+
     def get_default_field_names(self, declared_fields, model_info):
         field_names = super().get_default_field_names(declared_fields, model_info)
         try:
             field_names.remove("data")
         except ValueError:
             pass
-        aliases = self.__class__.Meta.fields
+        options = self.__class__.Meta
+        aliases = options.fields
         if aliases == "__all__":
             # TODO: source of repetitive queries.
             self._root_node = (
                 Node.objects.filter(
                     graph__slug=self.graph_slug,
-                    alias=self.__class__.Meta.root_node,
+                    # TODO: fix this misnomer/more self-documenting way to access this.
+                    alias=options.root_node or self.only[0],
                     graph__source_identifier=None,
                 )
                 .select_related("nodegroup")
@@ -129,11 +135,11 @@ class ArchesTileSerializer(serializers.ModelSerializer):
         return data
 
     def create(self, validated_data):
-        meta = self.__class__.Meta
-        qs = meta.model.as_nodegroup(
-            meta.root_node,
+        options = self.__class__.Meta
+        qs = options.model.as_nodegroup(
+            options.root_node or self.only[0],
             graph_slug=self.graph_slug,
-            only=None if meta.fields == "__all__" else meta.fields,
+            only=None if options.fields == "__all__" else options.fields,
             as_representation=True,
             allow_empty=True,
         )
@@ -229,7 +235,8 @@ class ArchesModelSerializer(serializers.ModelSerializer):
             unknown_keys := set(self.initial_data) - set(self.fields)
         ):
             raise ValidationError({unknown_keys.pop(): "Unexpected field"})
-        if not data.get("graph_id"):
+        # TODO: this probably doesn't belong here or needed anymore.
+        if "graph" in self.fields and not data.get("graph_id"):
             data["graph_id"] = self.fields["graph"].queryset.first().pk
         return data
 

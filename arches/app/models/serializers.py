@@ -9,6 +9,7 @@ from rest_framework import renderers
 from rest_framework import serializers
 
 from arches.app.models.fields.i18n import I18n_JSON, I18n_String
+from arches.app.models.models import ResourceInstance
 from arches.app.datatypes.datatypes import DataTypeFactory
 from arches.app.models.models import Node, TileModel
 from arches.app.utils.betterJSONSerializer import JSONSerializer
@@ -27,6 +28,10 @@ class ArchesTileSerializer(serializers.ModelSerializer):
         self._nodes = Node.objects.none()
         self._root_node = None
 
+    @property
+    def graph_slug(self):
+        return self.context["graph_slug"]
+
     def get_default_field_names(self, declared_fields, model_info):
         field_names = super().get_default_field_names(declared_fields, model_info)
         try:
@@ -35,9 +40,10 @@ class ArchesTileSerializer(serializers.ModelSerializer):
             pass
         aliases = self.__class__.Meta.fields
         if aliases == "__all__":
+            # TODO: source of repetitive queries.
             self._root_node = (
                 Node.objects.filter(
-                    graph__slug=self.__class__.Meta.graph_slug,
+                    graph__slug=self.graph_slug,
                     alias=self.__class__.Meta.root_node,
                     graph__source_identifier=None,
                 )
@@ -54,10 +60,9 @@ class ArchesTileSerializer(serializers.ModelSerializer):
         return field_names
 
     def build_unknown_field(self, field_name, model_class):
-        graph_slug = self.__class__.Meta.graph_slug
         if not self._nodes:
             self._nodes = Node.objects.filter(
-                graph__slug=graph_slug,
+                graph__slug=self.graph_slug,
                 graph__source_identifier=None,
             )
 
@@ -66,7 +71,7 @@ class ArchesTileSerializer(serializers.ModelSerializer):
                 break
         else:
             raise Node.DoesNotExist(
-                f"Node with alias {field_name} not found in graph {graph_slug}"
+                f"Node with alias {field_name} not found in graph {self.graph_slug}"
             )
 
         datatype = DataTypeFactory().get_instance(node.datatype)
@@ -107,9 +112,7 @@ class ArchesTileSerializer(serializers.ModelSerializer):
     def build_relational_field(self, field_name, relation_info):
         ret = super().build_relational_field(field_name, relation_info)
         if field_name == "resourceinstance":
-            ret[1]["queryset"] = ret[1]["queryset"].with_nodegroups(
-                self.Meta.graph_slug
-            )
+            ret[1]["queryset"] = ret[1]["queryset"].with_nodegroups(self.graph_slug)
             ret[1]["required"] = False
             ret[1]["html_cutoff"] = 25
         if field_name == "parenttile":
@@ -129,7 +132,7 @@ class ArchesTileSerializer(serializers.ModelSerializer):
         meta = self.__class__.Meta
         qs = meta.model.as_nodegroup(
             meta.root_node,
-            graph_slug=meta.graph_slug,
+            graph_slug=self.graph_slug,
             only=None if meta.fields == "__all__" else meta.fields,
             as_representation=True,
             allow_empty=True,
@@ -148,21 +151,39 @@ class ArchesModelSerializer(serializers.ModelSerializer):
 
     _root_nodes = Node.objects.none()
 
-    def get_fields(self):
-        graph_slug = self.__class__.Meta.graph_slug
+    class Meta:
+        model = ResourceInstance
+        fields = "__all__"
+        nodegroups = "__all__"
 
-        if self.__class__.Meta.nodegroups == "__all__":
+        # If None, it will be supplied by a route providing a <slug:graph> component
+        graph_slug = None
+        # ... and checked against this list of allowed graph slugs.
+        read_only_graphs = "__all__"
+
+    @property
+    def graph_slug(self):
+        return self.context["graph_slug"]
+
+    @property
+    def only(self):
+        return self.context["only"]
+
+    def get_fields(self):
+        graph_slug = self.context["graph_slug"]
+
+        if self.only:
             self._root_nodes = Node.objects.filter(
                 graph__slug=graph_slug,
                 graph__source_identifier=None,
                 nodegroup_id=F("nodeid"),
+                node__alias__in=self.only,
             ).select_related("nodegroup")
         else:
             self._root_nodes = Node.objects.filter(
                 graph__slug=graph_slug,
                 graph__source_identifier=None,
                 nodegroup_id=F("nodeid"),
-                node__alias__in=self.__class__.Meta.nodegroups,
             ).select_related("nodegroup")
         for root in self._root_nodes:
             if root.alias not in self._declared_fields:
@@ -174,18 +195,17 @@ class ArchesModelSerializer(serializers.ModelSerializer):
         aliases = self.__class__.Meta.fields
         if aliases != "__all__":
             raise NotImplementedError  # TODO...
-        nodegroups = self.__class__.Meta.nodegroups
-        if nodegroups == "__all__":
-            field_names.extend(self._root_nodes.values_list("alias", flat=True))
+        if self.only:
+            field_names.extend(self.only)
         else:
-            field_names.extend(self.__class__.Meta.nodegroups)
+            field_names.extend(self._root_nodes.values_list("alias", flat=True))
         return field_names
 
     def build_relational_field(self, field_name, relation_info):
         ret = super().build_relational_field(field_name, relation_info)
         if field_name == "graph":
             ret[1]["queryset"] = ret[1]["queryset"].filter(
-                graphmodel__slug=self.__class__.Meta.graph_slug
+                graphmodel__slug=self.graph_slug
             )
         return ret
 
@@ -193,8 +213,9 @@ class ArchesModelSerializer(serializers.ModelSerializer):
         class DynamicTileSerializer(ArchesTileSerializer):
             class Meta:
                 model = TileModel
-                graph_slug = self.__class__.Meta.graph_slug
+                graph_slug = self.graph_slug
                 root_node = root.alias
+                # TODO(jtw): test this
                 fields = self.__class__.Meta.fields
 
         self._declared_fields[root.alias] = DynamicTileSerializer(
@@ -219,8 +240,8 @@ class ArchesModelSerializer(serializers.ModelSerializer):
         with transaction.atomic():
             instance_without_tile_data = super().create(validated_data)
             instance_from_factory = meta.model.as_model(
-                graph_slug=self.__class__.Meta.graph_slug,
-                only=None if meta.nodegroups == "__all__" else meta.nodegroups,
+                graph_slug=self.graph_slug,
+                only=self.only,
             ).get(pk=instance_without_tile_data.pk)
             instance_from_factory._as_representation = True
             updated = self.update(instance_from_factory, validated_data)

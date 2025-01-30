@@ -207,10 +207,12 @@ class ResourceInstanceQuerySet(QuerySet):
 
         if resource_ids and not graph_slug:
             graph_query = GraphModel.objects.filter(resourceinstance__in=resource_ids)
-        else:
+        elif graph_slug:
             graph_query = GraphModel.objects.filter(
                 slug=graph_slug, source_identifier=None
             )
+        else:
+            raise ValueError("graph_slug or resource_ids must be provided")
         try:
             # Prefetch sibling nodes for use in _prefetch_related_objects()
             # and generate_tile_annotations().

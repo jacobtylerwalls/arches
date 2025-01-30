@@ -2,6 +2,7 @@ from functools import partial
 from itertools import chain
 
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.utils.translation import gettext as _
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.metadata import SimpleMetadata
 
@@ -29,26 +30,59 @@ class MetadataWithWidgetConfig(SimpleMetadata):
 class ArchesModelAPIMixin:
     metadata_class = MetadataWithWidgetConfig
 
+    def dispatch(self, *args, **kwargs):
+        options = self.serializer_class.Meta
+        if not options.graph_slug and (graph_slug := self.kwargs.get("graph", None)):
+            unsafe_methods = {"DELETE", "POST", "PUT", "PATCH"}
+            if self.request.method in unsafe_methods and graph_slug in getattr(
+                options.read_only_graphs, {}
+            ):
+                msg = _("{graph} is read-only".format(graph=graph_slug))
+                # Rely on future core arches work to transform to BAD_REQUEST json.
+                # https://github.com/archesproject/arches/issues/11722
+                raise ValueError(msg)
+            self.graph_slug = graph_slug
+        else:
+            self.graph_slug = options.graph_slug
+
+        # TODO: a bit of simplification/param renaming here.
+        if getattr(options, "nodegroups", None) == "__all__":
+            if nodegroup := self.kwargs.get("nodegroup", None):
+                self.only = [nodegroup]
+            else:
+                self.only = None
+        elif getattr(options, "root_node", None):
+            self.only = [options.root_node]
+        else:
+            self.only = options.nodegroups
+
+        return super().dispatch(*args, **kwargs)
+
     def get_queryset(self):
-        fields = self.serializer_class.Meta.fields
-        if fields == "__all__":
+        options = self.serializer_class.Meta
+        if options.fields == "__all__":
             fields = None
         else:
             raise NotImplementedError
-        meta = self.serializer_class.Meta
-        if ResourceInstance in meta.model.mro():
-            only = None if meta.nodegroups == "__all__" else meta.nodegroups
-            return meta.model.as_model(
-                meta.graph_slug, only=only, as_representation=True
+        if issubclass(options.model, ResourceInstance):
+            return options.model.as_model(
+                self.graph_slug, only=self.only, as_representation=True
             )
-        elif TileModel in meta.model.mro():
-            return meta.model.as_nodegroup(
-                meta.root_node,
-                graph_slug=meta.graph_slug,
+        if issubclass(options.model, TileModel):
+            return options.model.as_nodegroup(
+                options.root_node,
+                graph_slug=self.graph_slug,
                 only=fields,
                 as_representation=True,
             )
         raise NotImplementedError
+
+    def get_serializer_context(self):
+        return {
+            **super().get_serializer_context(),
+            "graph_slug": self.graph_slug,
+            "only": self.only,
+        }
 
     def get_object(self, user=None, permission_callable=None):
         ret = super().get_object()
@@ -108,9 +142,8 @@ class ArchesModelAPIMixin:
         try:
             serializer.save()
         except DjangoValidationError as django_error:
-            raise ValidationError(
-                detail=self.flatten_validation_errors(django_error)
-            ) from django_error
+            flattened_errors = self.flatten_validation_errors(django_error)
+            raise ValidationError(flattened_errors) from django_error
         # The backend hydrates additional data, so make sure to use it.
         # We could avoid this by only validating data during clean(),
         # not save(), but we do graph/node queries during each phase.

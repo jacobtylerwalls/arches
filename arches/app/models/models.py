@@ -1378,8 +1378,13 @@ class ResourceInstance(models.Model):
             add_to_update_fields(kwargs, "resource_instance_lifecycle_state")
 
         if getattr(self, "_fetched_root_nodes", False):
-            self._save_tiles_for_pythonic_model(user=user, index=index, **kwargs)
-            self.save_edit(user=user)
+            with transaction.atomic():
+                self._save_tiles_for_pythonic_model(user=user, index=index, **kwargs)
+                # update_fields=set() will abort the save, but at least calling
+                # into save() will run a sanity check on unsaved relations.
+                super().save(update_fields=set())
+                # TODO: document that this is not compatible with signals.
+                self.save_edit(user=user)
         else:
             super().save(**kwargs)
 
@@ -2065,7 +2070,12 @@ class TileModel(models.Model):  # Tile
             add_to_update_fields(kwargs, "tileid")
 
         if getattr(self, "_fetched_root_nodes", False):
-            self._save_from_pythonic_model_values(user=user, index=index, **kwargs)
+            with transaction.atomic():
+                self._save_from_pythonic_model_values(user=user, index=index, **kwargs)
+                # update_fields=set() will abort the save, but at least calling
+                # into save() will run a sanity check on unsaved relations.
+                super().save(update_fields=set())
+                # TODO: document that this is not compatible with signals.
         else:
             super().save(**kwargs)
 

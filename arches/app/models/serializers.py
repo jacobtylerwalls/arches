@@ -132,6 +132,11 @@ class ArchesTileSerializer(serializers.ModelSerializer):
             unknown_keys := set(self.initial_data) - set(self.fields)
         ):
             raise ValidationError({unknown_keys.pop(): "Unexpected field"})
+
+        validate_method = getattr(self, f"validate_{self._root_node.alias}", None)
+        if validate_method:
+            data = validate_method(data)
+
         return data
 
     def create(self, validated_data):

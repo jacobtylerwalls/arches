@@ -33,14 +33,6 @@ class ArchesModelAPIMixin:
     def dispatch(self, *args, **kwargs):
         options = self.serializer_class.Meta
         if not options.graph_slug and (graph_slug := self.kwargs.get("graph", None)):
-            unsafe_methods = {"DELETE", "POST", "PUT", "PATCH"}
-            if self.request.method in unsafe_methods and graph_slug in getattr(
-                options, "read_only_graphs", {}
-            ):
-                msg = _("{graph} is read-only".format(graph=graph_slug))
-                # Rely on future core arches work to transform to BAD_REQUEST json.
-                # https://github.com/archesproject/arches/issues/11722
-                raise ValueError(msg)
             self.graph_slug = graph_slug
         else:
             self.graph_slug = options.graph_slug

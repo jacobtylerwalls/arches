@@ -169,8 +169,6 @@ class ArchesModelSerializer(serializers.ModelSerializer):
 
         # If None, it will be supplied by a route providing a <slug:graph> component
         graph_slug = None
-        # ... and checked against this list of allowed graph slugs.
-        read_only_graphs = "__all__"
 
     @property
     def graph_slug(self):

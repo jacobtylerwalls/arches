@@ -202,10 +202,10 @@ class ArchesModelSerializer(serializers.ModelSerializer):
         aliases = self.__class__.Meta.fields
         if aliases != "__all__":
             raise NotImplementedError  # TODO...
-        if self.only:
-            field_names.extend(self.only)
-        else:
-            field_names.extend(self._root_nodes.values_list("alias", flat=True))
+        # if self.only:
+        #     field_names.extend(self.only)
+        # else:
+        field_names.extend(self._root_nodes.values_list("alias", flat=True))
         return field_names
 
     def build_relational_field(self, field_name, relation_info):

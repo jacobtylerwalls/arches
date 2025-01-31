@@ -48,7 +48,7 @@ class ArchesTileSerializer(serializers.ModelSerializer):
             # TODO: source of repetitive queries.
             self._root_node = (
                 Node.objects.filter(
-                    graph__slug=self.graph_slug,
+                    graph__slug=options.graph_slug or self.graph_slug,
                     # TODO: fix this misnomer/more self-documenting way to access this.
                     alias=options.root_node or self.only[0],
                     graph__source_identifier=None,
@@ -176,25 +176,26 @@ class ArchesModelSerializer(serializers.ModelSerializer):
         return self.context["only"]
 
     def get_fields(self):
-        graph_slug = self.context["graph_slug"]
+        fields = super().get_fields()
 
         if self.only:
             self._root_nodes = Node.objects.filter(
-                graph__slug=graph_slug,
+                graph__slug=self.graph_slug,
                 graph__source_identifier=None,
                 nodegroup_id=F("nodeid"),
                 node__alias__in=self.only,
             ).select_related("nodegroup")
         else:
             self._root_nodes = Node.objects.filter(
-                graph__slug=graph_slug,
+                graph__slug=self.graph_slug,
                 graph__source_identifier=None,
                 nodegroup_id=F("nodeid"),
             ).select_related("nodegroup")
         for root in self._root_nodes:
-            if root.alias not in self._declared_fields:
-                self._make_tile_serializer(root)
-        return super().get_fields()
+            if root.alias not in fields:
+                fields[root.alias] = self._make_tile_serializer(root)
+
+        return fields
 
     def get_default_field_names(self, declared_fields, model_info):
         field_names = super().get_default_field_names(declared_fields, model_info)
@@ -224,7 +225,7 @@ class ArchesModelSerializer(serializers.ModelSerializer):
                 # TODO(jtw): test this
                 fields = self.__class__.Meta.fields
 
-        self._declared_fields[root.alias] = DynamicTileSerializer(
+        return DynamicTileSerializer(
             many=root.nodegroup.cardinality == "n",
             required=False,
             allow_null=True,

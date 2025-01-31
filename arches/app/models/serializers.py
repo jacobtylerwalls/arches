@@ -150,6 +150,12 @@ class ArchesTileSerializer(serializers.ModelSerializer):
         )
         qs.first()
         validated_data["nodegroup_id"] = qs._fetched_nodes[0].nodegroup_id
+        if validated_data.get("sortorder") is None:
+            # Use a dummy instance to avoid save() and signals.
+            dummy_instance = options.model(**validated_data)
+            dummy_instance.sortorder = None
+            dummy_instance.set_next_sort_order()
+            validated_data["sortorder"] = dummy_instance.sortorder
         with transaction.atomic():
             blank_tile = super().create(validated_data)
             tile_from_factory = qs.get(pk=blank_tile.pk)

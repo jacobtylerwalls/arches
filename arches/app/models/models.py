@@ -1588,6 +1588,7 @@ class ResourceInstance(models.Model):
         db_tiles = [
             t for t in self._annotated_tiles if t.nodegroup_alias == root_node.alias
         ]
+        next_sort_order = max(t.sortorder or 0 for t in db_tiles or [-1]) + 1
         for db_tile, new_tile in zip_longest(
             db_tiles, new_tiles, fillvalue=NOT_PROVIDED
         ):
@@ -1602,8 +1603,8 @@ class ResourceInstance(models.Model):
                     parenttile=getattr(new_tile, "parenttile", None),
                 )
                 new_tile_obj._nodegroup_alias = root_node.alias
-                if db_tiles:
-                    new_tile_obj.sortorder = max(t.sortorder or 0 for t in db_tiles) + 1
+                new_tile_obj.sortorder = next_sort_order
+                next_sort_order += 1
                 new_tile_obj._incoming_tile = new_tile
                 to_insert.add(new_tile_obj)
             else:
@@ -2059,11 +2060,7 @@ class TileModel(models.Model):  # Tile
                 if not str(node.pk) in self.data:
                     self.data[str(node.pk)] = None
 
-            sortorder_max = TileModel.objects.filter(
-                nodegroup_id=self.nodegroup_id,
-                resourceinstance_id=self.resourceinstance_id,
-            ).aggregate(Max("sortorder"))["sortorder__max"]
-            self.sortorder = sortorder_max + 1 if sortorder_max is not None else 0
+            self.set_next_sort_order()
             add_to_update_fields(kwargs, "sortorder")
         if not self.tileid:
             self.tileid = uuid.uuid4()
@@ -2071,6 +2068,8 @@ class TileModel(models.Model):  # Tile
 
         if getattr(self, "_fetched_root_nodes", False):
             with transaction.atomic():
+                if self.sortorder is None or self.is_fully_provisional():
+                    self.set_next_sort_order()
                 self._save_from_pythonic_model_values(user=user, index=index, **kwargs)
                 # update_fields=set() will abort the save, but at least calling
                 # into save() will run a sanity check on unsaved relations.
@@ -2078,6 +2077,13 @@ class TileModel(models.Model):  # Tile
                 # TODO: document that this is not compatible with signals.
         else:
             super().save(**kwargs)
+
+    def set_next_sort_order(self):
+        sortorder_max = self.__class__.objects.filter(
+            nodegroup_id=self.nodegroup_id,
+            resourceinstance_id=self.resourceinstance_id,
+        ).aggregate(Max("sortorder"))["sortorder__max"]
+        self.sortorder = sortorder_max + 1 if sortorder_max is not None else 0
 
     def _save_from_pythonic_model_values(self, *, user=None, index=False, **kwargs):
         from arches.app.datatypes.datatypes import DataTypeFactory

@@ -1587,7 +1587,7 @@ class ResourceInstance(models.Model):
         db_tiles = [
             t for t in self._annotated_tiles if t.nodegroup_alias == root_node.alias
         ]
-        if db_tiles:
+        if not db_tiles:
             next_sort_order = 0
         else:
             next_sort_order = max(t.sortorder or 0 for t in db_tiles) + 1

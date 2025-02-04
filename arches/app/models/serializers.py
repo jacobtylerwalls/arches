@@ -3,7 +3,6 @@ from functools import lru_cache
 
 from django.core.exceptions import MultipleObjectsReturned, ObjectDoesNotExist
 from django.db import transaction
-from django.db.models import F
 from rest_framework.exceptions import ValidationError
 from rest_framework import fields
 from rest_framework import renderers
@@ -26,12 +25,15 @@ class ArchesTileSerializer(serializers.ModelSerializer):
 
     def __init__(self, instance=None, data=fields.empty, **kwargs):
         super().__init__(instance, data, **kwargs)
-        self._nodes = Node.objects.none()
         self._root_node = None
 
     @property
     def graph_slug(self):
         return self.context["graph_slug"]
+
+    @property
+    def graph_nodes(self):
+        return self.context["graph_nodes"]
 
     @property
     def only(self):
@@ -49,35 +51,24 @@ class ArchesTileSerializer(serializers.ModelSerializer):
         except ValueError:
             pass
         options = self.__class__.Meta
-        aliases = options.fields
-        if aliases == "__all__":
-            # TODO: source of repetitive queries.
-            self._root_node = (
-                Node.objects.filter(
-                    graph__slug=options.graph_slug or self.graph_slug,
-                    # TODO: fix this misnomer/more self-documenting way to access this.
-                    alias=options.root_node or self.only[0],
-                    graph__source_identifier=None,
-                )
-                .select_related("nodegroup")
-                .get()
-            )
-            aliases = (
-                self._root_node.nodegroup.node_set.exclude(nodegroup=None)
-                .exclude(datatype="semantic")
-                .values_list("alias", flat=True)
-            )
-        field_names.extend(aliases)
+        if options.fields == "__all__":
+            # TODO: fix this misnomer/more self-documenting way to access this.
+            root_alias = options.root_node or self.only[0]
+            for node in self.graph_nodes:
+                if node.alias == root_alias:
+                    self._root_node = node
+                    break
+            else:
+                raise RuntimeError
+            self._root_node = node
+            for child_node in self._root_node.nodegroup.node_set.all():
+                if child_node.datatype != "semantic":
+                    field_names.append(child_node.alias)
+
         return field_names
 
     def build_unknown_field(self, field_name, model_class):
-        if not self._nodes:
-            self._nodes = Node.objects.filter(
-                graph__slug=self.graph_slug,
-                graph__source_identifier=None,
-            ).prefetch_related("cardxnodexwidget_set")
-
-        for node in self._nodes:
+        for node in self.graph_nodes:
             if node.alias == field_name:
                 break
         else:
@@ -176,8 +167,6 @@ class ArchesTileSerializer(serializers.ModelSerializer):
 class ArchesModelSerializer(serializers.ModelSerializer):
     legacyid = serializers.CharField(max_length=255, required=False, allow_null=True)
 
-    _root_nodes = Node.objects.none()
-
     class Meta:
         model = ResourceInstance
         fields = "__all__"
@@ -186,9 +175,17 @@ class ArchesModelSerializer(serializers.ModelSerializer):
         # If None, it will be supplied by a route providing a <slug:graph> component
         graph_slug = None
 
+    def __init__(self, instance=None, data=fields.empty, **kwargs):
+        super().__init__(instance, data, **kwargs)
+        self._nodegroup_aliases = []
+
     @property
     def graph_slug(self):
         return self.context["graph_slug"]
+
+    @property
+    def graph_nodes(self):
+        return self.context["graph_nodes"]
 
     @property
     def only(self):
@@ -196,23 +193,15 @@ class ArchesModelSerializer(serializers.ModelSerializer):
 
     def get_fields(self):
         fields = super().get_fields()
+        self._nodegroup_aliases = []
 
-        if self.only:
-            self._root_nodes = Node.objects.filter(
-                graph__slug=self.graph_slug,
-                graph__source_identifier=None,
-                nodegroup_id=F("nodeid"),
-                node__alias__in=self.only,
-            ).select_related("nodegroup")
-        else:
-            self._root_nodes = Node.objects.filter(
-                graph__slug=self.graph_slug,
-                graph__source_identifier=None,
-                nodegroup_id=F("nodeid"),
-            ).select_related("nodegroup")
-        for root in self._root_nodes:
-            if root.alias not in fields:
-                fields[root.alias] = self._make_tile_serializer(root)
+        for node in self.graph_nodes:
+            if self.only and node.alias not in self.only:
+                continue
+            if node.pk == node.nodegroup.pk:
+                self._nodegroup_aliases.append(node.alias)
+                if node.alias not in fields:
+                    fields[node.alias] = self._make_tile_serializer(node)
 
         return fields
 
@@ -224,7 +213,7 @@ class ArchesModelSerializer(serializers.ModelSerializer):
         # if self.only:
         #     field_names.extend(self.only)
         # else:
-        field_names.extend(self._root_nodes.values_list("alias", flat=True))
+        field_names.extend(self._nodegroup_aliases)
         return field_names
 
     def build_relational_field(self, field_name, relation_info):

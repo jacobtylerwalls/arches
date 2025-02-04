@@ -2,11 +2,12 @@ from functools import partial
 from itertools import chain
 
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.utils.functional import cached_property
 from django.utils.translation import gettext as _
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.metadata import SimpleMetadata
 
-from arches.app.models.models import ResourceInstance, TileModel
+from arches.app.models.models import Node, ResourceInstance, TileModel
 from arches.app.utils.permission_backend import (
     user_can_delete_resource,
     user_can_edit_resource,
@@ -71,10 +72,26 @@ class ArchesModelAPIMixin:
             )
         raise NotImplementedError
 
+    @cached_property
+    def graph_nodes(self):
+        return (
+            Node.objects.filter(
+                graph__slug=self.graph_slug,
+                graph__source_identifier=None,
+                nodegroup__isnull=False,
+            )
+            .select_related("nodegroup")
+            .prefetch_related(
+                "nodegroup__node_set",
+                "cardxnodexwidget_set",
+            )
+        )
+
     def get_serializer_context(self):
         return {
             **super().get_serializer_context(),
             "graph_slug": self.graph_slug,
+            "graph_nodes": self.graph_nodes,
             "only": self.only,
         }
 

@@ -1,6 +1,6 @@
 from django.db.models import OuterRef, Prefetch, QuerySet
 
-from arches.app.models.utils import find_root_node, generate_tile_annotations
+from arches.app.models.utils import generate_tile_annotations
 
 
 class TileQuerySet(QuerySet):
@@ -90,7 +90,7 @@ class TileQuerySet(QuerySet):
         Discard annotations that do not pertain to this nodegroup.
         """
         from arches.app.datatypes.datatypes import DataTypeFactory
-        from arches.app.models.models import Node, TileModel
+        from arches.app.models.models import TileModel
 
         super()._prefetch_related_objects()
 
@@ -98,14 +98,8 @@ class TileQuerySet(QuerySet):
         NOT_PROVIDED = object()
         for tile in self._result_cache:
             tile._fetched_nodes = self._fetched_nodes
-            tile._fetched_root_nodes = set()
             for node in self._fetched_nodes:
                 if node.nodegroup_id == tile.nodegroup_id:
-                    # Replace with new v8 root/grouping node lookup.
-                    if Node(pk=tile.nodegroup_id) not in tile._fetched_root_nodes:
-                        tile._fetched_root_nodes.add(
-                            Node.objects.get(pk=tile.nodegroup_id)
-                        )
                     tile_val = getattr(tile, node.alias, NOT_PROVIDED)
                     if tile_val is not NOT_PROVIDED:
                         datatype_instance = datatype_factory.get_instance(node.datatype)
@@ -224,7 +218,9 @@ class ResourceInstanceQuerySet(QuerySet):
             e.add_note(f"No graph found with slug: {graph_slug}")
             raise
 
-        nodes = source_graph.node_set.all()
+        nodes = source_graph.node_set.select_related(
+            "nodegroup__grouping_node__nodegroup"
+        )
         node_alias_annotations = generate_tile_annotations(
             nodes,
             defer=defer,
@@ -269,7 +265,7 @@ class ResourceInstanceQuerySet(QuerySet):
 
         root_nodes = []
         for node in self._fetched_nodes:
-            root_node = find_root_node(node.nodegroup.node_set.all(), node.nodegroup_id)
+            root_node = node.nodegroup.grouping_node
             root_nodes.append(root_node)
 
         for resource in self._result_cache:

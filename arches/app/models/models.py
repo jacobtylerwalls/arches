@@ -18,7 +18,6 @@ from arches.app.models.querysets import ResourceInstanceQuerySet, TileQuerySet
 from arches.app.models.utils import (
     add_to_update_fields,
     field_names,
-    find_root_node_from_fetched_root_nodes,
     pop_arches_model_kwargs,
 )
 from arches.app.utils.betterJSONSerializer import JSONSerializer
@@ -1616,9 +1615,10 @@ class ResourceInstance(models.Model):
                 to_update.add(db_tile)
 
         upserts = to_insert | to_update
+        nodes = root_node.nodegroup.node_set.all()
         for tile in upserts:
             self._validate_and_patch_from_tile_values(
-                tile, root_node=root_node, errors_by_node_alias=errors_by_node_alias
+                tile, nodes=nodes, errors_by_node_alias=errors_by_node_alias
             )
             # Remove blank tiles.
             # TODO: also check for unsaved children?
@@ -1634,14 +1634,14 @@ class ResourceInstance(models.Model):
                 to_update.remove(tile)
 
     @staticmethod
-    def _validate_and_patch_from_tile_values(tile, *, root_node, errors_by_node_alias):
+    def _validate_and_patch_from_tile_values(tile, *, nodes, errors_by_node_alias):
         """Validate data found on ._incoming_tile and move it to .data.
         Update errors_by_node_alias in place."""
         from arches.app.datatypes.datatypes import DataTypeFactory
 
         NOT_PROVIDED = object()
         datatype_factory = DataTypeFactory()
-        for node in root_node.nodegroup.node_set.all():
+        for node in nodes:
             node_id_str = str(node.pk)
             # TODO: remove this switch and deserialize this in DRF.
             if isinstance(tile._incoming_tile, TileModel):
@@ -1999,7 +1999,7 @@ class TileModel(models.Model):  # Tile
     @classmethod
     def as_nodegroup(
         cls,
-        root_node_alias,
+        root_node_alias,  # TODO: remove
         *,
         graph_slug,
         defer=None,
@@ -2041,7 +2041,7 @@ class TileModel(models.Model):  # Tile
 
         qs = (
             Node.objects.filter(graph__slug=graph_slug, alias=root_node_alias)
-            .select_related("nodegroup")
+            .select_related("nodegroup__grouping_node__nodegroup")
             .prefetch_related("nodegroup__node_set")
             # Prefetching to a depth of 2 seems like a good trade-off for now.
             .prefetch_related("nodegroup__children")
@@ -2069,7 +2069,7 @@ class TileModel(models.Model):  # Tile
             self.tileid = uuid.uuid4()
             add_to_update_fields(kwargs, "tileid")
 
-        if getattr(self, "_fetched_root_nodes", False):
+        if getattr(self, "_fetched_nodes", False):
             with transaction.atomic():
                 if self.sortorder is None or self.is_fully_provisional():
                     self.set_next_sort_order()
@@ -2183,12 +2183,12 @@ class TileModel(models.Model):  # Tile
             self._incoming_tile[tile_attr] = tile_value
 
         errors_by_alias = defaultdict(list)
+        if not self.nodegroup:
+            raise ValueError
         # TODO: move this somewhere else.
         ResourceInstance._validate_and_patch_from_tile_values(
             self,
-            root_node=find_root_node_from_fetched_root_nodes(
-                self._fetched_root_nodes, self.nodegroup_id
-            ),
+            nodes=self.nodegroup.node_set.all(),
             errors_by_node_alias=errors_by_alias,
         )
         if not any(self.data.values()):
@@ -2285,9 +2285,7 @@ class TileModel(models.Model):  # Tile
             NOT_PROVIDED = object()
             aliases = [n.alias for n in fetched_nodes]
             from_queryset = self.__class__.as_nodegroup(
-                root_node_alias=find_root_node_from_fetched_root_nodes(
-                    self._fetched_root_nodes, self.nodegroup_id
-                ).alias,
+                root_node_alias=self.nodegroup_alias,
                 graph_slug=self.resourceinstance.graph.slug,
                 # TODO: re-enable only after finding out where
                 # to filter down _fetched_nodes so that it only

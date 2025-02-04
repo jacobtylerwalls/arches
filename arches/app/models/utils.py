@@ -33,9 +33,9 @@ def generate_tile_annotations(nodes, *, defer, only, model, lhs=None, outer_ref)
     node_alias_annotations = {}
     invalid_names = field_names(model)
     is_resource = True
-    if ResourceInstance in model.mro():
+    if issubclass(model, ResourceInstance):
         is_resource = True
-    elif TileModel in model.mro():
+    elif issubclass(model, TileModel):
         is_resource = False
     else:
         raise ValueError(model)
@@ -45,7 +45,7 @@ def generate_tile_annotations(nodes, *, defer, only, model, lhs=None, outer_ref)
         if node.nodegroup_id is None:
             continue
         if is_resource:
-            root = find_root_node(node.nodegroup.node_set.all(), node.nodegroup_id)
+            root = node.nodegroup.grouping_node
             if (defer and root.alias in defer) or (only and root.alias not in only):
                 continue
         else:
@@ -80,18 +80,6 @@ def pop_arches_model_kwargs(kwargs, model_fields):
             arches_model_data[kwarg] = value
     without_model_data = {k: v for k, v in kwargs.items() if k not in arches_model_data}
     return arches_model_data, without_model_data
-
-
-def find_root_node(prefetched_siblings, nodegroup_id):
-    for sibling_node in prefetched_siblings:
-        if sibling_node.pk == nodegroup_id:
-            return sibling_node
-
-
-def find_root_node_from_fetched_root_nodes(fetched_root_nodes, nodegroup_id):
-    for candidate in fetched_root_nodes:
-        if candidate.pk == nodegroup_id:
-            return candidate
 
 
 def get_values_query(*, nodegroup, base_lookup, lhs=None, outer_ref) -> BaseExpression:

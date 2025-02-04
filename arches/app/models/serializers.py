@@ -118,7 +118,7 @@ class ArchesTileSerializer(serializers.ModelSerializer):
                 ret[1]["queryset"], self.graph_slug
             )
             ret[1]["required"] = False
-            ret[1]["html_cutoff"] = 25
+            ret[1]["html_cutoff"] = 0
         if field_name == "parenttile":
             ret[1]["queryset"] = ret[1]["queryset"].filter(
                 nodegroup_id=self._root_node.nodegroup.parentnodegroup_id

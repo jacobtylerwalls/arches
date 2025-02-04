@@ -36,8 +36,8 @@ class ArchesTileSerializer(serializers.ModelSerializer):
         return self.context["graph_nodes"]
 
     @property
-    def only(self):
-        return self.context["only"]
+    def root_node_alias(self):
+        return self.__class__.Meta.root_node or self.context["root_node_aliases"][0]
 
     @staticmethod
     @lru_cache(maxsize=1)
@@ -50,12 +50,9 @@ class ArchesTileSerializer(serializers.ModelSerializer):
             field_names.remove("data")
         except ValueError:
             pass
-        options = self.__class__.Meta
-        if options.fields == "__all__":
-            # TODO: fix this misnomer/more self-documenting way to access this.
-            root_alias = options.root_node or self.only[0]
+        if self.__class__.Meta.fields == "__all__":
             for node in self.graph_nodes:
-                if node.alias == root_alias:
+                if node.alias == self.root_node_alias:
                     self._root_node = node
                     break
             else:
@@ -143,7 +140,7 @@ class ArchesTileSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         options = self.__class__.Meta
         qs = options.model.as_nodegroup(
-            options.root_node or self.only[0],
+            options.root_node or self.root_node_alias,
             graph_slug=self.graph_slug,
             only=None if options.fields == "__all__" else options.fields,
             as_representation=True,
@@ -188,15 +185,15 @@ class ArchesModelSerializer(serializers.ModelSerializer):
         return self.context["graph_nodes"]
 
     @property
-    def only(self):
-        return self.context["only"]
+    def root_node_aliases(self):
+        return self.context.get("root_node_aliases")
 
     def get_fields(self):
         fields = super().get_fields()
         self._nodegroup_aliases = []
 
         for node in self.graph_nodes:
-            if self.only and node.alias not in self.only:
+            if self.root_node_aliases and node.alias not in self.root_node_aliases:
                 continue
             if node.pk == node.nodegroup.pk:
                 self._nodegroup_aliases.append(node.alias)
@@ -210,8 +207,8 @@ class ArchesModelSerializer(serializers.ModelSerializer):
         aliases = self.__class__.Meta.fields
         if aliases != "__all__":
             raise NotImplementedError  # TODO...
-        # if self.only:
-        #     field_names.extend(self.only)
+        # if self.root_node_aliases:
+        #     field_names.extend(self.root_node_aliases)
         # else:
         field_names.extend(self._nodegroup_aliases)
         return field_names
@@ -257,7 +254,7 @@ class ArchesModelSerializer(serializers.ModelSerializer):
             instance_without_tile_data = super().create(validated_data)
             instance_from_factory = meta.model.as_model(
                 graph_slug=self.graph_slug,
-                only=self.only,
+                only=self.root_node_aliases,
             ).get(pk=instance_without_tile_data.pk)
             instance_from_factory._as_representation = True
             updated = self.update(instance_from_factory, validated_data)

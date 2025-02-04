@@ -38,18 +38,16 @@ class ArchesModelAPIMixin:
         else:
             self.graph_slug = options.graph_slug
 
-        # TODO: a bit of simplification/param renaming here.
         if issubclass(options.model, ResourceInstance):
-            self.only = options.nodegroups
-            if options.nodegroups == "__all__":
-                if nodegroup_alias := kwargs.get("nodegroup_alias", None):
-                    self.only = [nodegroup_alias]
-                else:
-                    self.only = None
+            self.root_nodes = options.nodegroups
+            if options.nodegroups == "__all__" and (
+                nodegroup_alias := kwargs.get("nodegroup_alias", None)
+            ):
+                self.root_node_aliases = [nodegroup_alias]
+            else:
+                self.root_node_aliases = None
         else:
-            self.only = [options.root_node]
-            if options.root_node is None:
-                self.only = [kwargs["nodegroup_alias"]]
+            self.root_node_aliases = [options.root_node or kwargs["nodegroup_alias"]]
 
         return super().dispatch(*args, **kwargs)
 
@@ -61,11 +59,11 @@ class ArchesModelAPIMixin:
             raise NotImplementedError
         if issubclass(options.model, ResourceInstance):
             return options.model.as_model(
-                self.graph_slug, only=self.only, as_representation=True
+                self.graph_slug, only=self.root_node_aliases, as_representation=True
             )
         if issubclass(options.model, TileModel):
             return options.model.as_nodegroup(
-                self.only[0],
+                self.root_node_aliases[0],
                 graph_slug=self.graph_slug,
                 only=fields,
                 as_representation=True,
@@ -92,7 +90,7 @@ class ArchesModelAPIMixin:
             **super().get_serializer_context(),
             "graph_slug": self.graph_slug,
             "graph_nodes": self.graph_nodes,
-            "only": self.only,
+            "root_node_aliases": self.root_node_aliases,
         }
 
     def get_object(self, user=None, permission_callable=None):

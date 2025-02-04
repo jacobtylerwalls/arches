@@ -1588,7 +1588,10 @@ class ResourceInstance(models.Model):
         db_tiles = [
             t for t in self._annotated_tiles if t.nodegroup_alias == root_node.alias
         ]
-        next_sort_order = max(t.sortorder or 0 for t in db_tiles or [-1]) + 1
+        if db_tiles:
+            next_sort_order = 0
+        else:
+            next_sort_order = max(t.sortorder or 0 for t in db_tiles) + 1
         for db_tile, new_tile in zip_longest(
             db_tiles, new_tiles, fillvalue=NOT_PROVIDED
         ):

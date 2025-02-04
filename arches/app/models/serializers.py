@@ -1,4 +1,5 @@
 from copy import deepcopy
+from functools import lru_cache
 
 from django.core.exceptions import MultipleObjectsReturned, ObjectDoesNotExist
 from django.db import transaction
@@ -36,6 +37,11 @@ class ArchesTileSerializer(serializers.ModelSerializer):
     def only(self):
         return self.context["only"]
 
+    @staticmethod
+    @lru_cache(maxsize=1)
+    def enrich_resource_instance_queryset(manager, graph_slug):
+        return manager.with_nodegroups(graph_slug)
+
     def get_default_field_names(self, declared_fields, model_info):
         field_names = super().get_default_field_names(declared_fields, model_info)
         try:
@@ -54,7 +60,6 @@ class ArchesTileSerializer(serializers.ModelSerializer):
                     graph__source_identifier=None,
                 )
                 .select_related("nodegroup")
-                .prefetch_related("nodegroup__node_set")
                 .get()
             )
             aliases = (
@@ -70,7 +75,7 @@ class ArchesTileSerializer(serializers.ModelSerializer):
             self._nodes = Node.objects.filter(
                 graph__slug=self.graph_slug,
                 graph__source_identifier=None,
-            )
+            ).prefetch_related("cardxnodexwidget_set")
 
         for node in self._nodes:
             if node.alias == field_name:
@@ -87,11 +92,11 @@ class ArchesTileSerializer(serializers.ModelSerializer):
         model_field.model = model_class
         model_field.blank = not node.isrequired
         try:
-            cross = node.cardxnodexwidget_set.get()
+            cross = node.cardxnodexwidget_set.all()[0]
             label = cross.label
             visible = cross.visible
             config = cross.config
-        except (ObjectDoesNotExist, MultipleObjectsReturned):
+        except (IndexError, ObjectDoesNotExist, MultipleObjectsReturned):
             label = I18n_String()
             visible = False
             config = I18n_JSON()
@@ -118,13 +123,18 @@ class ArchesTileSerializer(serializers.ModelSerializer):
     def build_relational_field(self, field_name, relation_info):
         ret = super().build_relational_field(field_name, relation_info)
         if field_name == "resourceinstance":
-            ret[1]["queryset"] = ret[1]["queryset"].with_nodegroups(self.graph_slug)
+            ret[1]["queryset"] = self.enrich_resource_instance_queryset(
+                ret[1]["queryset"], self.graph_slug
+            )
             ret[1]["required"] = False
             ret[1]["html_cutoff"] = 25
         if field_name == "parenttile":
             ret[1]["queryset"] = ret[1]["queryset"].filter(
                 nodegroup_id=self._root_node.nodegroup.parentnodegroup_id
             )
+            # Avoid queries to populate dropdowns in browsable API.
+            # https://www.django-rest-framework.org/topics/browsable-api/#handling-choicefield-with-large-numbers-of-items
+            ret[1]["style"] = {"base_template": "input.html"}
         return ret
 
     def validate(self, data):

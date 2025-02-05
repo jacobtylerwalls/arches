@@ -97,6 +97,9 @@ class TileQuerySet(QuerySet):
         datatype_factory = DataTypeFactory()
         NOT_PROVIDED = object()
         for tile in self._result_cache:
+            if not isinstance(tile, self.model):
+                # For a .values() query, we will lack instances.
+                continue
             tile._fetched_nodes = self._fetched_nodes
             for node in self._fetched_nodes:
                 if node.nodegroup_id == tile.nodegroup_id:

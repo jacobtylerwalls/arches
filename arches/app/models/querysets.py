@@ -259,22 +259,23 @@ class ResourceInstanceQuerySet(QuerySet):
         ).annotate(**node_alias_annotations)
 
     def _prefetch_related_objects(self):
-        """Attach annotated tiles to resource instances, at the root, by
-        nodegroup alias. TODO: consider building as a nested structure.
+        """
+        Attach annotated tiles to resource instances in a nested structure.
         Discard annotations only used for shallow filtering.
         Memoize fetched root node aliases.
         """
         super()._prefetch_related_objects()
 
-        root_nodes = []
+        root_nodes = set()
         for node in self._fetched_nodes:
             root_node = node.nodegroup.grouping_node
-            root_nodes.append(root_node)
+            root_nodes.add(root_node)
 
         for resource in self._result_cache:
             if not isinstance(resource, self.model):
                 # For a .values() query, we will lack instances.
                 continue
+            # TODO: fix misnomer, since it's not just root nodes.
             resource._fetched_root_nodes = set()
             for node in self._fetched_nodes:
                 delattr(resource, node.alias)
@@ -286,6 +287,8 @@ class ResourceInstanceQuerySet(QuerySet):
                 )
                 resource._fetched_root_nodes.add(root_node)
             annotated_tiles = getattr(resource, "_annotated_tiles", [])
+            # TODO: this is probably what should get passed around, not the array.
+            annotated_tile_lookup = {tile.pk: tile for tile in annotated_tiles}
             for annotated_tile in annotated_tiles:
                 for root_node in root_nodes:
                     if root_node.pk == annotated_tile.nodegroup_id:
@@ -313,9 +316,21 @@ class ResourceInstanceQuerySet(QuerySet):
                 # Attach children to this parent.
                 for child_tile in annotated_tile.children.all():
                     children = getattr(annotated_tile, child_tile.nodegroup_alias, [])
-                    if child_tile not in children:
-                        children.append(child_tile)
-                    setattr(annotated_tile, child_tile.nodegroup_alias, children)
+                    annotated_child_tile = annotated_tile_lookup[child_tile.pk]
+                    if child_tile in children:
+                        # Seems like I shouldn't have to do this, but look later (TODO).
+                        children[children.index(child_tile)] = annotated_child_tile
+                    else:
+                        children.append(annotated_tile_lookup[child_tile.pk])
+                    if child_tile.nodegroup.cardinality == "1":
+                        setattr(annotated_tile, child_tile.nodegroup_alias, children[0])
+                    else:
+                        setattr(annotated_tile, child_tile.nodegroup_alias, children)
+
+            # Final pruning.
+            for node in root_nodes:
+                if node.nodegroup.parentnodegroup_id:
+                    delattr(resource, node.alias)
 
     def _clone(self):
         ret = super()._clone()

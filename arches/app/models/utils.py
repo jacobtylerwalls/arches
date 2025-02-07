@@ -1,5 +1,5 @@
 from django.contrib.postgres.expressions import ArraySubquery
-from django.db.models import OuterRef, Subquery
+from django.db.models import OuterRef
 from django.db.models.expressions import BaseExpression
 
 
@@ -21,6 +21,10 @@ def add_to_update_fields(kwargs, field_name):
 
 def field_names(instance_or_class):
     return {f.name for f in instance_or_class._meta.fields}
+
+
+def field_attnames(instance_or_class):
+    return {f.attname for f in instance_or_class._meta.fields}
 
 
 def generate_tile_annotations(nodes, *, defer, only, model, lhs=None, outer_ref):
@@ -103,6 +107,6 @@ def get_values_query(*, nodegroup, base_lookup, lhs=None, outer_ref) -> BaseExpr
     tile_query = tile_query.values(base_lookup)
 
     if outer_ref == "tileid":
-        return Subquery(tile_query)
+        return tile_query
     else:
         return ArraySubquery(tile_query)

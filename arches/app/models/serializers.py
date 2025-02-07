@@ -3,6 +3,7 @@ from functools import lru_cache
 
 from django.core.exceptions import MultipleObjectsReturned, ObjectDoesNotExist
 from django.db import transaction
+from django.utils.translation import gettext as _
 from rest_framework.exceptions import ValidationError
 from rest_framework import fields
 from rest_framework import renderers
@@ -20,20 +21,41 @@ renderers.JSONRenderer.encoder_class = JSONSerializer
 renderers.JSONOpenAPIRenderer.encoder_class = JSONSerializer
 
 
+def _make_tile_serializer(*, alias, cardinality, context, nodes="__all__"):
+    # Parameter renaming is because I can't shadow the inner class attributes.
+    class DynamicTileSerializer(ArchesTileSerializer):
+        class Meta:
+            model = TileModel
+            graph_slug = context["graph_slug"]
+            root_node = alias
+            # TODO(jtw): test this
+            fields = nodes
+
+    ret = DynamicTileSerializer(
+        many=cardinality == "n",
+        required=False,
+        allow_null=True,
+    )
+    ret._graph_nodes = context["graph_nodes"]
+    return ret
+
+
 class ArchesTileSerializer(serializers.ModelSerializer):
     tileid = serializers.UUIDField(validators=[], required=False)
 
     def __init__(self, instance=None, data=fields.empty, **kwargs):
         super().__init__(instance, data, **kwargs)
         self._root_node = None
+        self._child_nodegroup_aliases = []
+        self._graph_nodes = None
 
     @property
     def graph_slug(self):
-        return self.context["graph_slug"]
+        return self.__class__.Meta.graph_slug or self.context["graph_slug"]
 
     @property
     def graph_nodes(self):
-        return self.context["graph_nodes"]
+        return self._graph_nodes or self.context["graph_nodes"]
 
     @property
     def root_node_alias(self):
@@ -44,24 +66,44 @@ class ArchesTileSerializer(serializers.ModelSerializer):
     def enrich_resource_instance_queryset(manager, graph_slug):
         return manager.with_nodegroups(graph_slug)
 
+    def get_fields(self):
+        for node in self.graph_nodes:
+            if node.alias == self.root_node_alias:
+                self._root_node = node
+                break
+        else:
+            raise RuntimeError
+
+        fields = super().get_fields()
+
+        # __all__ now includes one level of child nodegroups.
+        if self.__class__.Meta.fields == "__all__":
+            for child_nodegroup in self._root_node.nodegroup.children.all():
+                child_nodegroup_alias = child_nodegroup.grouping_node.alias
+                self._child_nodegroup_aliases.append(child_nodegroup_alias)
+
+                if child_nodegroup_alias not in fields:
+                    fields[child_nodegroup_alias] = _make_tile_serializer(
+                        alias=child_nodegroup_alias,
+                        cardinality=child_nodegroup.cardinality,
+                        context=self.context,
+                    )
+
+        return fields
+
     def get_default_field_names(self, declared_fields, model_info):
         field_names = super().get_default_field_names(declared_fields, model_info)
         try:
             field_names.remove("data")
         except ValueError:
             pass
-        if self.__class__.Meta.fields == "__all__":
-            for node in self.graph_nodes:
-                if node.alias == self.root_node_alias:
-                    self._root_node = node
-                    break
-            else:
-                raise RuntimeError
-            self._root_node = node
-            for child_node in self._root_node.nodegroup.node_set.all():
-                if child_node.datatype != "semantic":
-                    field_names.append(child_node.alias)
 
+        if self.__class__.Meta.fields == "__all__":
+            for sibling_node in self._root_node.nodegroup.node_set.all():
+                if sibling_node.datatype != "semantic":
+                    field_names.append(sibling_node.alias)
+
+        field_names.extend(self._child_nodegroup_aliases)
         return field_names
 
     def build_unknown_field(self, field_name, model_class):
@@ -76,7 +118,15 @@ class ArchesTileSerializer(serializers.ModelSerializer):
         datatype = DataTypeFactory().get_instance(node.datatype)
         model_field = deepcopy(datatype.rest_framework_model_field)
         if model_field is None:
-            raise NotImplementedError(f"Field missing for datatype: {node.datatype}")
+            if node.nodegroup.grouping_node == node:
+                model_field = _make_tile_serializer(
+                    slug=self.graph_slug,
+                    alias=node.alias,
+                    cardinality=node.nodegroup.cardinality,
+                )
+            else:
+                msg = _("Field missing for datatype: {}").format(node.datatype)
+                raise NotImplementedError(msg)
         model_field.model = model_class
         model_field.blank = not node.isrequired
         try:
@@ -117,9 +167,6 @@ class ArchesTileSerializer(serializers.ModelSerializer):
             ret[1]["required"] = False
             ret[1]["html_cutoff"] = 0
         if field_name == "parenttile":
-            ret[1]["queryset"] = ret[1]["queryset"].filter(
-                nodegroup_id=self._root_node.nodegroup.parentnodegroup_id
-            )
             # Avoid queries to populate dropdowns in browsable API.
             # https://www.django-rest-framework.org/topics/browsable-api/#handling-choicefield-with-large-numbers-of-items
             ret[1]["style"] = {"base_template": "input.html"}
@@ -195,10 +242,18 @@ class ArchesModelSerializer(serializers.ModelSerializer):
         for node in self.graph_nodes:
             if self.root_node_aliases and node.alias not in self.root_node_aliases:
                 continue
+            # This will be unnecessary once root_node_aliases functions
+            # as described (TODO)
+            if node.nodegroup.parentnodegroup_id:
+                continue
             if node.pk == node.nodegroup.pk:
                 self._nodegroup_aliases.append(node.alias)
                 if node.alias not in fields:
-                    fields[node.alias] = self._make_tile_serializer(node)
+                    fields[node.alias] = _make_tile_serializer(
+                        alias=node.alias,
+                        cardinality=node.nodegroup.cardinality,
+                        context=self.context,
+                    )
 
         return fields
 
@@ -220,21 +275,6 @@ class ArchesModelSerializer(serializers.ModelSerializer):
                 graphmodel__slug=self.graph_slug
             )
         return ret
-
-    def _make_tile_serializer(self, root):
-        class DynamicTileSerializer(ArchesTileSerializer):
-            class Meta:
-                model = TileModel
-                graph_slug = self.graph_slug
-                root_node = root.alias
-                # TODO(jtw): test this
-                fields = self.__class__.Meta.fields
-
-        return DynamicTileSerializer(
-            many=root.nodegroup.cardinality == "n",
-            required=False,
-            allow_null=True,
-        )
 
     def validate(self, data):
         if hasattr(self, "initial_data") and (

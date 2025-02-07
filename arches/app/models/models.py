@@ -18,6 +18,7 @@ from arches.app.models.querysets import ResourceInstanceQuerySet, TileQuerySet
 from arches.app.models.utils import (
     add_to_update_fields,
     field_names,
+    field_attnames,
     pop_arches_model_kwargs,
 )
 from arches.app.utils.betterJSONSerializer import JSONSerializer
@@ -1430,7 +1431,7 @@ class ResourceInstance(models.Model):
                 upsert_proxy._existing_provisionaledits = upsert_proxy.provisionaledits
 
                 # Sync proxy instance fields.
-                for field in field_names(vanilla_instance):
+                for field in field_attnames(vanilla_instance):
                     setattr(upsert_proxy, field, getattr(vanilla_instance, field))
 
                 # Run tile lifecycle updates on proxy instance.
@@ -1539,8 +1540,9 @@ class ResourceInstance(models.Model):
 
         original_tile_data_by_tile_id = {}
         for root_node in self._fetched_root_nodes:
-            self._update_tile_for_root_node(
+            self._update_tile_for_grouping_node(
                 root_node,
+                self,
                 original_tile_data_by_tile_id,
                 to_insert,
                 to_update,
@@ -1559,9 +1561,10 @@ class ResourceInstance(models.Model):
 
         return to_insert, to_update, to_delete
 
-    def _update_tile_for_root_node(
+    def _update_tile_for_grouping_node(
         self,
-        root_node,
+        grouping_node,
+        container,
         original_tile_data_by_tile_id,
         to_insert,
         to_update,
@@ -1570,10 +1573,13 @@ class ResourceInstance(models.Model):
     ):
         NOT_PROVIDED = object()
 
-        new_tiles = getattr(self, root_node.alias, NOT_PROVIDED)
+        if isinstance(container, dict):
+            new_tiles = container.get(grouping_node.alias, NOT_PROVIDED)
+        else:
+            new_tiles = getattr(container, grouping_node.alias, NOT_PROVIDED)
         if new_tiles is NOT_PROVIDED:
             return
-        if root_node.nodegroup.cardinality == "1":
+        if grouping_node.nodegroup.cardinality == "1":
             if new_tiles is None:
                 new_tiles = []
             else:
@@ -1581,11 +1587,14 @@ class ResourceInstance(models.Model):
         if all(isinstance(tile, TileModel) for tile in new_tiles):
             new_tiles.sort(key=attrgetter("sortorder"))
         else:
-            # TODO: figure out best layer for deserializing and remove if/else.
-            # TODO: nullguard or make not nullable.
-            pass
+            # DRF doesn't provide nested writable fields by default.
+            # TODO: probably move this to the serializers.
+            parent_tile = container if isinstance(container, TileModel) else None
+            new_tiles = [
+                TileModel(**{**tile, "parenttile": parent_tile}) for tile in new_tiles
+            ]
         db_tiles = [
-            t for t in self._annotated_tiles if t.nodegroup_alias == root_node.alias
+            t for t in self._annotated_tiles if t.nodegroup_alias == grouping_node.alias
         ]
         if not db_tiles:
             next_sort_order = 0
@@ -1598,36 +1607,86 @@ class ResourceInstance(models.Model):
                 to_delete.add(db_tile)
                 continue
             if db_tile is NOT_PROVIDED:
-                new_tile_obj = TileModel.get_blank_tile_from_nodegroup(
-                    nodegroup=root_node.nodegroup,
-                    resourceid=self.pk,
-                    # TODO: ensure this deserializes correctly.
-                    parenttile=getattr(new_tile, "parenttile", None),
-                )
-                new_tile_obj._nodegroup_alias = root_node.alias
-                new_tile_obj.sortorder = next_sort_order
+                new_tile.nodegroup_id = grouping_node.nodegroup_id
+                new_tile.resourceinstance_id = self.pk
+                new_tile.sortorder = next_sort_order
                 next_sort_order += 1
-                new_tile_obj._incoming_tile = new_tile
-                to_insert.add(new_tile_obj)
+                for node in grouping_node.nodegroup.node_set.all():
+                    new_tile.data[str(node.pk)] = None
+
+                parent_tile = new_tile.parenttile
+                exclude = None
+                if parent_tile:
+                    if (
+                        parent_tile.nodegroup_id
+                        != grouping_node.nodegroup.parentnodegroup_id
+                    ):
+                        raise ValueError(
+                            _("Wrong nodegroup for parent tile: {}".format(parent_tile))
+                        )
+                    if parent_tile._state.adding:
+                        exclude = {"parenttile"}
+
+                new_tile._incoming_tile = new_tile
+                new_tile.full_clean(exclude=exclude)
+                to_insert.add(new_tile)
             else:
                 original_tile_data_by_tile_id[db_tile.pk] = {**db_tile.data}
                 db_tile._incoming_tile = new_tile
                 to_update.add(db_tile)
 
-        upserts = to_insert | to_update
-        nodes = root_node.nodegroup.node_set.all()
-        for tile in upserts:
+        nodes = grouping_node.nodegroup.node_set.all()
+        for tile in to_insert | to_update:
+            if tile.nodegroup.pk != grouping_node.pk:
+                # TODO: this is a symptom this should be refactored.
+                continue
+            # Not object-oriented because tile.nodegroup is a property.
+            children = (
+                NodeGroup.objects.filter(parentnodegroup_id=tile.nodegroup_id)
+                .select_related("grouping_node__nodegroup")
+                .prefetch_related("grouping_node__nodegroup__node_set")
+            )
+            for child_nodegroup in children:
+                self._update_tile_for_grouping_node(
+                    grouping_node=child_nodegroup.grouping_node,
+                    container=tile._incoming_tile,
+                    original_tile_data_by_tile_id=original_tile_data_by_tile_id,
+                    to_insert=to_insert,
+                    to_update=to_update,
+                    to_delete=to_delete,
+                    errors_by_node_alias=errors_by_node_alias,
+                )
             self._validate_and_patch_from_tile_values(
                 tile, nodes=nodes, errors_by_node_alias=errors_by_node_alias
             )
-            # Remove blank tiles.
-            # TODO: also check for unsaved children?
-            if not any(tile.data.values()) and not tile.children.count():
+
+        for tile in to_insert | to_update:
+            if tile.nodegroup.pk != grouping_node.pk:
+                # TODO: this is a symptom this should be refactored.
+                continue
+            # Remove blank tiles if they have no children.
+            if (
+                not any(tile.data.values())
+                and not tile.children.exists()
+                # Check unsaved children.
+                and not any(
+                    getattr(tile._incoming_tile, child_tile_alias, None)
+                    for child_tile_alias in grouping_node.nodegroup.children.values_list(
+                        "grouping_node__alias", flat=True
+                    )
+                )
+            ):
                 if tile._state.adding:
                     to_insert.remove(tile)
                 else:
                     to_update.remove(tile)
                     to_delete.add(tile)
+
+        for tile in to_insert | to_update:
+            if tile.nodegroup.pk != grouping_node.pk:
+                # TODO: this is a symptom this should be refactored.
+                continue
+            # Remove no-op upserts.
             if (
                 original_data := original_tile_data_by_tile_id.pop(tile.pk, None)
             ) and tile._tile_update_is_noop(original_data):
@@ -1696,7 +1755,7 @@ class ResourceInstance(models.Model):
             super().refresh_from_db(using, fields, from_queryset)
             # Copy over annotations and annotated tiles.
             refreshed_resource = from_queryset[0]
-            for field in itertools.chain(aliases, ["_annotated_tiles"]):
+            for field in (*aliases, "_annotated_tiles"):
                 setattr(self, field, getattr(refreshed_resource, field))
         else:
             super().refresh_from_db(using, fields, from_queryset)
@@ -2185,7 +2244,7 @@ class TileModel(models.Model):  # Tile
         errors_by_alias = defaultdict(list)
         if not self.nodegroup:
             raise ValueError
-        # TODO: move this somewhere else.
+        # TODO: Move. This shouldn't emit resource edit log entries.
         ResourceInstance._validate_and_patch_from_tile_values(
             self,
             nodes=self.nodegroup.node_set.all(),
@@ -2210,13 +2269,16 @@ class TileModel(models.Model):  # Tile
         from arches.app.datatypes.datatypes import DataTypeFactory
 
         datatype_factory = DataTypeFactory()
-        # TODO: address performance
-        for node in self.nodegroup.node_set.all():
+        # Not object-oriented because TileModel.nodegroup is a property.
+        for node in Node.objects.filter(nodegroup_id=self.nodegroup_id).only(
+            "datatype"
+        ):
             if node.datatype == "semantic":
                 continue
-            old = original_data[str(node.nodeid)]
+            node_id_str = str(node.nodeid)
+            old = original_data[node_id_str]
             datatype_instance = datatype_factory.get_instance(node.datatype)
-            new = self.data[str(node.nodeid)]
+            new = self.data[node_id_str]
             if not datatype_instance.values_match(old, new):
                 return False
 
@@ -2318,7 +2380,6 @@ class TileModel(models.Model):  # Tile
         for node in nodegroup.node_set.all():
             tile.data[str(node.nodeid)] = None
 
-        tile.full_clean()
         return tile
 
 

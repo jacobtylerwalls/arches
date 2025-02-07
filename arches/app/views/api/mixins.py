@@ -81,6 +81,8 @@ class ArchesModelAPIMixin:
             .select_related("nodegroup")
             .prefetch_related(
                 "nodegroup__node_set",
+                "nodegroup__children",
+                "nodegroup__children__grouping_node",
                 "cardxnodexwidget_set",
             )
         )

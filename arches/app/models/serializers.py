@@ -287,12 +287,12 @@ class ArchesModelSerializer(serializers.ModelSerializer):
         return data
 
     def create(self, validated_data):
-        meta = self.__class__.Meta
+        options = self.__class__.Meta
         # TODO: we probably want a queryset method to do one-shot
         # creates with tile data
         with transaction.atomic():
             instance_without_tile_data = super().create(validated_data)
-            instance_from_factory = meta.model.as_model(
+            instance_from_factory = options.model.as_model(
                 graph_slug=self.graph_slug,
                 only=self.root_node_aliases,
             ).get(pk=instance_without_tile_data.pk)

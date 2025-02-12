@@ -36,8 +36,9 @@ class TileQuerySet(QuerySet):
         <Concept: vellum (parchment) (34b081cd-6fcc-4e00-9a43-0a8a73745b45)>
             Fine-quality calf or lamb parchment ...
 
-        as_representation = True skips calling to_python datatype methods and calls
-        as_json() instead.
+        as_representation = True skips calling to_python() datatype methods and calls
+        to_representation() instead (rather than to_json() just to ensure we are
+        getting optimum performance and not yoking this feature to older use cases.)
 
         allow_empty = True includes tiles with no data, e.g. in some creation
         workflows involving creating a blank tile before fetching the richer
@@ -111,9 +112,11 @@ class TileQuerySet(QuerySet):
                             provisionaledits=tile.provisionaledits,
                         )
                         datatype_instance.to_json(dummy_tile, node)
-                        if not self._as_representation:
-                            tile_val = datatype_instance.to_python(tile_val)
-                        setattr(tile, node.alias, tile_val)
+                        if self._as_representation:
+                            instance_val = datatype_instance.to_representation(tile_val)
+                        else:
+                            instance_val = datatype_instance.to_python(tile_val)
+                        setattr(tile, node.alias, instance_val)
                 else:
                     delattr(tile, node.alias)
             for child_tile in tile.children.all():
@@ -195,8 +198,9 @@ class ResourceInstanceQuerySet(QuerySet):
 
         Provisional edits are completely ignored for the purposes of querying.
 
-        as_representation = True skips calling to_python datatype methods and calls
-        as_json() instead.
+        as_representation = True skips calling to_python() datatype methods and calls
+        to_representation() instead (rather than to_json() just to ensure we are
+        getting optimum performance and not yoking this feature to older use cases.)
         """
         from arches.app.models.models import GraphModel, NodeGroup, TileModel
 

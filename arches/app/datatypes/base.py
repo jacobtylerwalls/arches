@@ -545,5 +545,9 @@ class BaseDataType(object):
         """
         return f"data__{node.pk}"
 
+    # These next two methods are likely to move to an arches application.
     def to_python(self, tile_val):
+        return tile_val
+
+    def to_representation(self, tile_val):
         return tile_val

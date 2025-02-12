@@ -59,14 +59,14 @@ class ArchesModelAPIMixin:
             raise NotImplementedError
         if issubclass(options.model, ResourceInstance):
             return options.model.as_model(
-                self.graph_slug, only=self.root_node_aliases, as_representation=False
+                self.graph_slug, only=self.root_node_aliases, as_representation=True
             )
         if issubclass(options.model, TileModel):
             return options.model.as_nodegroup(
                 self.root_node_aliases[0],
                 graph_slug=self.graph_slug,
                 only=fields,
-                as_representation=False,
+                as_representation=True,
             )
         raise NotImplementedError
 

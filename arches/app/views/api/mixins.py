@@ -97,7 +97,12 @@ class ArchesModelAPIMixin:
 
     def get_object(self, user=None, permission_callable=None):
         ret = super().get_object()
-        if permission_callable and not permission_callable(user=user, resource=ret):
+        options = self.serializer_class.Meta
+        if issubclass(options.model, ResourceInstance):
+            permission_kwargs = {"user": user, "resource": ret}
+        else:
+            permission_kwargs = {"user": user, "resourceid": ret.resourceinstance_id}
+        if permission_callable and not permission_callable(**permission_kwargs):
             # Not 404, see https://github.com/archesproject/arches/issues/11563
             raise PermissionDenied
         ret.save = partial(ret.save, user=user)

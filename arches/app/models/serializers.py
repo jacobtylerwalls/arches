@@ -43,6 +43,13 @@ def _make_tile_serializer(*, alias, cardinality, context, nodes="__all__"):
 class ArchesTileSerializer(serializers.ModelSerializer):
     tileid = serializers.UUIDField(validators=[], required=False)
 
+    class Meta:
+        model = TileModel
+        # If None, supply by a route providing a <slug:graph> component
+        graph_slug = None
+        root_node = None
+        fields = "__all__"
+
     def __init__(self, instance=None, data=fields.empty, **kwargs):
         super().__init__(instance, data, **kwargs)
         self._root_node = None
@@ -208,16 +215,15 @@ class ArchesTileSerializer(serializers.ModelSerializer):
         return updated
 
 
-class ArchesModelSerializer(serializers.ModelSerializer):
+class ArchesResourceSerializer(serializers.ModelSerializer):
     legacyid = serializers.CharField(max_length=255, required=False, allow_null=True)
 
     class Meta:
         model = ResourceInstance
-        fields = "__all__"
-        nodegroups = "__all__"
-
-        # If None, it will be supplied by a route providing a <slug:graph> component
+        # If None, supply by a route providing a <slug:graph> component
         graph_slug = None
+        nodegroups = "__all__"
+        fields = "__all__"
 
     def __init__(self, instance=None, data=fields.empty, **kwargs):
         super().__init__(instance, data, **kwargs)

@@ -2155,7 +2155,7 @@ class TileModel(models.Model):  # Tile
         tile_data_changed = self._update_tile_from_pythonic_model_values()
         if not tile_data_changed:
             # TODO: double-check whether some user guard makes sense here.
-            # And whether indexing needs to run.
+            # And whether indexing or functions need to run.
             return super().save(**kwargs)
 
         # Instantiate a proxy model and sync data to it, to run all side effects.
@@ -2169,14 +2169,17 @@ class TileModel(models.Model):  # Tile
         # Capture these to avoid re-querying in _apply_provisional_edit().
         existing_data = proxy.data
         existing_provisional_edits = proxy.provisionaledits
-        for field in field_names(self):
+        for field in vars(self):
             setattr(proxy, field, getattr(self, field))
 
         datatype_factory = DataTypeFactory()
         with transaction.atomic():
-            proxy._Tile__preSave()
-            proxy.check_for_missing_nodes()
-            proxy.check_for_constraint_violation()
+            try:
+                proxy._Tile__preSave()
+                proxy.check_for_missing_nodes()
+                proxy.check_for_constraint_violation()
+            except TileValidationError as tve:
+                raise ValidationError(tve.message)
             oldprovisionalvalue, newprovisionalvalue, provisional_edit_log_details = (
                 self._apply_provisional_edit(
                     proxy, existing_data, existing_provisional_edits, user=user

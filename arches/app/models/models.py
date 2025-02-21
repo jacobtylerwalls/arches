@@ -33,6 +33,7 @@ from django.db import ProgrammingError, connection, transaction
 from django.db.models import JSONField, Max, Q
 from django.db.models import Value as ORMValue
 from django.db.models.constraints import UniqueConstraint
+from django.http import HttpRequest
 from django.utils import timezone, translation
 from django.utils.translation import gettext_lazy as _
 
@@ -1405,6 +1406,8 @@ class ResourceInstance(models.Model):
         from arches.app.models.resource import Resource
         from arches.app.models.tile import Tile
 
+        dummy_request = HttpRequest()
+        dummy_request.user = user
         datatype_factory = DataTypeFactory()
         to_insert, to_update, to_delete = (
             self._update_tiles_from_pythonic_model_values()
@@ -1456,7 +1459,7 @@ class ResourceInstance(models.Model):
                 upsert_proxy._existing_data = vanilla_instance.data
 
             for delete_proxy in delete_proxies:
-                delete_proxy._Tile__preDelete()
+                delete_proxy._Tile__preDelete(request=dummy_request)
 
             if to_insert:
                 inserted = TileModel.objects.bulk_create(to_insert)
@@ -2180,10 +2183,13 @@ class TileModel(models.Model):  # Tile
         for field in vars(self):
             setattr(proxy, field, getattr(self, field))
 
-        datatype_factory = DataTypeFactory()
+        # Some functions expect to always drill into request.user
+        # https://github.com/archesproject/arches/issues/8471
+        dummy_request = HttpRequest()
+        dummy_request.user = user
         with transaction.atomic():
             try:
-                proxy._Tile__preSave()
+                proxy._Tile__preSave(request=dummy_request)
                 proxy.check_for_missing_nodes()
                 proxy.check_for_constraint_violation()
             except TileValidationError as tve:
@@ -2197,9 +2203,9 @@ class TileModel(models.Model):  # Tile
             super().save(**kwargs)
             # TODO: address performance.
             for node in self.nodegroup.node_set.all():
-                datatype = datatype_factory.get_instance(node.datatype)
+                datatype = proxy.datatype_factory.get_instance(node.datatype)
                 datatype.post_tile_save(self, str(node.pk))
-            proxy._Tile__postSave()
+            proxy._Tile__postSave(request=dummy_request)
 
             if self._state.adding:
                 proxy.save_edit(

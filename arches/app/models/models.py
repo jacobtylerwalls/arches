@@ -1,10 +1,10 @@
-import sys
+import datetime
 import itertools
 import json
-import uuid
-import datetime
 import logging
+import sys
 import traceback
+import uuid
 from collections import defaultdict
 from itertools import zip_longest
 from operator import attrgetter
@@ -26,11 +26,10 @@ from arches.app.utils import import_class_from_string
 from django.contrib.auth.models import Group, User
 from django.contrib.gis.db import models
 from django.core.exceptions import ObjectDoesNotExist
-from django.db import connection
 from django.core.exceptions import ValidationError
 from django.core.serializers.json import DjangoJSONEncoder
 from django.core.validators import RegexValidator, validate_slug
-from django.db import transaction
+from django.db import ProgrammingError, connection, transaction
 from django.db.models import JSONField, Max, Q
 from django.db.models import Value as ORMValue
 from django.db.models.constraints import UniqueConstraint
@@ -2128,17 +2127,26 @@ class TileModel(models.Model):  # Tile
             self.tileid = uuid.uuid4()
             add_to_update_fields(kwargs, "tileid")
 
-        if getattr(self, "_fetched_nodes", False):
-            with transaction.atomic():
-                if self.sortorder is None or self.is_fully_provisional():
-                    self.set_next_sort_order()
-                self._save_from_pythonic_model_values(user=user, index=index, **kwargs)
-                # update_fields=set() will abort the save, but at least calling
-                # into save() will run a sanity check on unsaved relations.
-                super().save(update_fields=set())
-                # TODO: document that this is not compatible with signals.
-        else:
-            super().save(**kwargs)
+        nodegroup_alias = self.nodegroup_alias
+        try:
+            if getattr(self, "_fetched_nodes", False):
+                with transaction.atomic():
+                    if self.sortorder is None or self.is_fully_provisional():
+                        self.set_next_sort_order()
+                    self._save_from_pythonic_model_values(
+                        user=user, index=index, **kwargs
+                    )
+                    # update_fields=set() will abort the save, but at least calling
+                    # into save() will run a sanity check on unsaved relations.
+                    super().save(update_fields=set())
+                    # TODO: document that this is not compatible with signals.
+            else:
+                super().save(**kwargs)
+        except ProgrammingError as e:
+            if e.args and "excess_tiles" in e.args[0]:
+                msg = _("Tile Cardinality Error")
+                raise ValidationError({nodegroup_alias: msg}) from e
+            raise
 
     def set_next_sort_order(self):
         sortorder_max = self.__class__.objects.filter(

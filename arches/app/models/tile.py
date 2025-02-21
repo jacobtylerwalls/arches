@@ -885,9 +885,3 @@ class TileValidationError(Exception):
 
     def __str__(self):
         return repr(self.message)
-
-
-class TileCardinalityError(TileValidationError):
-    def __init__(self, message, code=None):
-        super(TileCardinalityError, self).__init__(message, code)
-        self.title = _("Tile Cardinality Error")

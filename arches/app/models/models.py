@@ -2287,6 +2287,15 @@ class TileModel(models.Model):  # Tile
 
         return True
 
+    def _enrich(self, graph_slug, *, only=None):
+        resource = ResourceInstance.as_model(
+            graph_slug, only=only, resource_ids=[self.resourceinstance_id]
+        ).get()
+        for grouping_node in resource._fetched_root_nodes:
+            for node in grouping_node.nodegroup.node_set.all():
+                setattr(self, node.alias, self.data.get(str(node.pk)))
+        self.resourceinstance = resource
+
     def _apply_provisional_edit(
         self, proxy, existing_data, existing_provisional_edits, *, user=None
     ):

@@ -1,6 +1,7 @@
 from copy import deepcopy
 from functools import lru_cache
 
+from django.conf import settings
 from django.core.exceptions import MultipleObjectsReturned, ObjectDoesNotExist
 from django.db import transaction
 from django.utils.translation import gettext as _
@@ -21,52 +22,81 @@ renderers.JSONRenderer.encoder_class = JSONSerializer
 renderers.JSONOpenAPIRenderer.encoder_class = JSONSerializer
 
 
-def _make_tile_serializer(*, alias, cardinality, context, nodes="__all__"):
-    # Parameter renaming is because I can't shadow the inner class attributes.
+def _make_tile_serializer(
+    *, nodegroup_alias, cardinality, slug, graph_nodes, nodes="__all__"
+):
     class DynamicTileSerializer(ArchesTileSerializer):
         class Meta:
             model = TileModel
-            graph_slug = context["graph_slug"]
-            root_node = alias
-            # TODO(jtw): test this
+            graph_slug = slug
+            root_node = nodegroup_alias
             fields = nodes
 
-    ret = DynamicTileSerializer(
+    name = "_".join((slug.title(), nodegroup_alias.title(), "TileSerializer"))
+    klass = type(name, (DynamicTileSerializer,), {})
+    ret = klass(
         many=cardinality == "n",
         required=False,
         allow_null=True,
     )
-    ret._graph_nodes = context["graph_nodes"]
+    ret._graph_nodes = graph_nodes
     return ret
 
 
-class ArchesTileSerializer(serializers.ModelSerializer):
+class NodeFetcherMixin:
+    @property
+    def graph_slug(self):
+        return (
+            self.__class__.Meta.graph_slug
+            or self.context.get("graph_slug")
+            or getattr(settings, "SPECTACULAR_SETTINGS", {}).get(
+                "GRAPH_SLUG_FOR_GENERIC_SERIALIZER"
+            )
+        )
+
+    @property
+    def graph_nodes(self):
+        if not self._graph_nodes:
+            self._graph_nodes = self.find_graph_nodes()
+        return self._graph_nodes
+
+    def find_graph_nodes(self):
+        return (
+            Node.objects.filter(
+                graph__slug=self.graph_slug,
+                graph__source_identifier=None,
+                nodegroup__isnull=False,
+            )
+            .select_related("nodegroup")
+            .prefetch_related(
+                "nodegroup__node_set",
+                "nodegroup__children",
+                "nodegroup__children__grouping_node",
+                "cardxnodexwidget_set",
+            )
+        )
+
+    @property
+    def root_node_aliases(self):
+        return [node.alias for node in self.graph_nodes]
+
+
+class ArchesTileSerializer(serializers.ModelSerializer, NodeFetcherMixin):
     tileid = serializers.UUIDField(validators=[], required=False)
 
     class Meta:
         model = TileModel
         # If None, supply by a route providing a <slug:graph> component
         graph_slug = None
+        # If None, supply by a route providing a <slug:nodegroup_alias> component
         root_node = None
         fields = "__all__"
 
     def __init__(self, instance=None, data=fields.empty, **kwargs):
         super().__init__(instance, data, **kwargs)
         self._root_node = None
+        self._graph_nodes = []
         self._child_nodegroup_aliases = []
-        self._graph_nodes = None
-
-    @property
-    def graph_slug(self):
-        return self.__class__.Meta.graph_slug or self.context["graph_slug"]
-
-    @property
-    def graph_nodes(self):
-        return self._graph_nodes or self.context["graph_nodes"]
-
-    @property
-    def root_node_alias(self):
-        return self.__class__.Meta.root_node or self.context["root_node_aliases"][0]
 
     @staticmethod
     @lru_cache(maxsize=1)
@@ -75,7 +105,8 @@ class ArchesTileSerializer(serializers.ModelSerializer):
 
     def get_fields(self):
         for node in self.graph_nodes:
-            if node.alias == self.root_node_alias:
+            # Why [0]?
+            if node.alias == self.root_node_aliases[0]:
                 self._root_node = node
                 break
         else:
@@ -91,9 +122,10 @@ class ArchesTileSerializer(serializers.ModelSerializer):
 
                 if child_nodegroup_alias not in fields:
                     fields[child_nodegroup_alias] = _make_tile_serializer(
-                        alias=child_nodegroup_alias,
+                        nodegroup_alias=child_nodegroup_alias,
                         cardinality=child_nodegroup.cardinality,
-                        context=self.context,
+                        slug=self.graph_slug,
+                        graph_nodes=self.graph_nodes,
                     )
 
         return fields
@@ -128,8 +160,9 @@ class ArchesTileSerializer(serializers.ModelSerializer):
             if node.nodegroup.grouping_node == node:
                 model_field = _make_tile_serializer(
                     slug=self.graph_slug,
-                    alias=node.alias,
+                    nodegroup_alias=node.alias,
                     cardinality=node.nodegroup.cardinality,
+                    graph_nodes=self.graph_nodes,
                 )
             else:
                 msg = _("Field missing for datatype: {}").format(node.datatype)
@@ -215,7 +248,7 @@ class ArchesTileSerializer(serializers.ModelSerializer):
         return updated
 
 
-class ArchesResourceSerializer(serializers.ModelSerializer):
+class ArchesResourceSerializer(serializers.ModelSerializer, NodeFetcherMixin):
     legacyid = serializers.CharField(max_length=255, required=False, allow_null=True)
 
     class Meta:
@@ -227,26 +260,18 @@ class ArchesResourceSerializer(serializers.ModelSerializer):
 
     def __init__(self, instance=None, data=fields.empty, **kwargs):
         super().__init__(instance, data, **kwargs)
+        self._graph_nodes = []
         self._nodegroup_aliases = []
-
-    @property
-    def graph_slug(self):
-        return self.context["graph_slug"]
-
-    @property
-    def graph_nodes(self):
-        return self.context["graph_nodes"]
-
-    @property
-    def root_node_aliases(self):
-        return self.context.get("root_node_aliases")
 
     def get_fields(self):
         fields = super().get_fields()
         self._nodegroup_aliases = []
 
+        if not self.graph_nodes:
+            raise RuntimeError
+
         for node in self.graph_nodes:
-            if self.root_node_aliases and node.alias not in self.root_node_aliases:
+            if node.alias not in self.root_node_aliases:
                 continue
             # This will be unnecessary once root_node_aliases functions
             # as described (TODO)
@@ -256,9 +281,10 @@ class ArchesResourceSerializer(serializers.ModelSerializer):
                 self._nodegroup_aliases.append(node.alias)
                 if node.alias not in fields:
                     fields[node.alias] = _make_tile_serializer(
-                        alias=node.alias,
+                        slug=self.graph_slug,
+                        nodegroup_alias=node.alias,
                         cardinality=node.nodegroup.cardinality,
-                        context=self.context,
+                        graph_nodes=self.graph_nodes,
                     )
 
         return fields

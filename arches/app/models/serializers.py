@@ -104,14 +104,13 @@ class ArchesTileSerializer(serializers.ModelSerializer, NodeFetcherMixin):
         return manager.with_nodegroups(graph_slug)
 
     def get_fields(self):
+        nodegroup_alias = self.Meta.root_node or self.context.get("nodegroup_alias")
         for node in self.graph_nodes:
-            # Why [0]?
-            if node.alias == self.root_node_aliases[0]:
+            if node.alias == nodegroup_alias:
                 self._root_node = node
                 break
         else:
-            raise RuntimeError
-
+            raise RuntimeError("missing root node")
         fields = super().get_fields()
 
         # __all__ now includes one level of child nodegroups.
@@ -267,9 +266,7 @@ class ArchesResourceSerializer(serializers.ModelSerializer, NodeFetcherMixin):
         fields = super().get_fields()
         self._nodegroup_aliases = []
 
-        if not self.graph_nodes:
-            raise RuntimeError
-
+        assert self.graph_nodes
         for node in self.graph_nodes:
             if node.alias not in self.root_node_aliases:
                 continue

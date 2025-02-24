@@ -32,7 +32,7 @@ class ArchesModelAPIMixin:
 
     def dispatch(self, *args, **kwargs):
         options = self.serializer_class.Meta
-        if not options.graph_slug and (graph_slug := self.kwargs.get("graph", None)):
+        if not options.graph_slug and (graph_slug := self.kwargs.get("graph")):
             self.graph_slug = graph_slug
         else:
             self.graph_slug = options.graph_slug
@@ -40,13 +40,17 @@ class ArchesModelAPIMixin:
         if issubclass(options.model, ResourceInstance):
             self.root_nodes = options.nodegroups
             if options.nodegroups == "__all__" and (
-                nodegroup_alias := kwargs.get("nodegroup_alias", None)
+                nodegroup_alias := kwargs.get("nodegroup_alias")
             ):
                 self.root_node_aliases = [nodegroup_alias]
             else:
                 self.root_node_aliases = None
         else:
-            self.root_node_aliases = [options.root_node or kwargs["nodegroup_alias"]]
+            self.root_node_aliases = [
+                options.root_node or kwargs.get("nodegroup_alias")
+            ]
+
+        self._nodegroup_alias = kwargs.get("nodegroup_alias")
 
         return super().dispatch(*args, **kwargs)
 
@@ -73,6 +77,7 @@ class ArchesModelAPIMixin:
         return {
             **super().get_serializer_context(),
             "graph_slug": self.graph_slug,
+            "nodegroup_alias": self._nodegroup_alias,
         }
 
     def get_object(self, user=None, permission_callable=None):

@@ -1524,6 +1524,11 @@ class ResourceInstance(models.Model):
                     transaction_id=None,
                 )
 
+        self.refresh_from_db(
+            using=kwargs.get("using", None),
+            fields=kwargs.get("update_fields", None),
+        )
+
         # Instantiate proxy model for now, but refactor & expose this on vanilla model
         proxy_resource = Resource.objects.get(pk=self.pk)
         proxy_resource.save_descriptors()
@@ -1757,7 +1762,9 @@ class ResourceInstance(models.Model):
             super().refresh_from_db(using, fields, from_queryset)
             # Copy over annotations and annotated tiles.
             refreshed_resource = from_queryset[0]
-            for field in (*aliases, "_annotated_tiles"):
+            for field in {*aliases, "_annotated_tiles"}.intersection(
+                vars(refreshed_resource)
+            ):
                 setattr(self, field, getattr(refreshed_resource, field))
         else:
             super().refresh_from_db(using, fields, from_queryset)
@@ -2370,8 +2377,7 @@ class TileModel(models.Model):  # Tile
             and (fetched_nodes := getattr(self, "_fetched_nodes", set()))
             and self.resourceinstance.graph.slug
         ):
-            NOT_PROVIDED = object()
-            aliases = [n.alias for n in fetched_nodes]
+            aliases = {n.alias for n in fetched_nodes}
             from_queryset = self.__class__.as_nodegroup(
                 root_node_alias=self.nodegroup_alias,
                 graph_slug=self.resourceinstance.graph.slug,
@@ -2383,12 +2389,8 @@ class TileModel(models.Model):  # Tile
             super().refresh_from_db(using, fields, from_queryset)
             # Copy over annotations.
             refreshed_tile = from_queryset[0]
-            for field in aliases:
-                # TODO: why is this if needed?
-                if (
-                    annotation := getattr(refreshed_tile, field, NOT_PROVIDED)
-                ) is not NOT_PROVIDED:
-                    setattr(self, field, annotation)
+            for field in aliases.intersection(vars(refreshed_tile)):
+                setattr(self, field, getattr(refreshed_tile, field))
         else:
             super().refresh_from_db(using, fields, from_queryset)
 

@@ -226,14 +226,13 @@ class ArchesTileSerializer(serializers.ModelSerializer, NodeFetcherMixin):
     def create(self, validated_data):
         options = self.__class__.Meta
         qs = options.model.as_nodegroup(
-            options.root_node or self.root_node_alias,
+            self._root_node.alias,
             graph_slug=self.graph_slug,
             only=None if options.fields == "__all__" else options.fields,
             as_representation=True,
             allow_empty=True,
         )
-        qs.first()
-        validated_data["nodegroup_id"] = qs._fetched_nodes[0].nodegroup_id
+        validated_data["nodegroup_id"] = self._root_node.nodegroup_id
         if validated_data.get("sortorder") is None:
             # Use a dummy instance to avoid save() and signals.
             dummy_instance = options.model(**validated_data)

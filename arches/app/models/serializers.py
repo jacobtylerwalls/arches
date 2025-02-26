@@ -38,8 +38,8 @@ def _make_tile_serializer(
         many=cardinality == "n",
         required=False,
         allow_null=True,
+        graph_nodes=graph_nodes,
     )
-    ret._graph_nodes = graph_nodes
     return ret
 
 
@@ -57,7 +57,10 @@ class NodeFetcherMixin:
     @property
     def graph_nodes(self):
         if not self._graph_nodes:
-            self._graph_nodes = self.find_graph_nodes()
+            if self.instance and hasattr(self.instance, "_fetched_graph"):
+                self._graph_nodes = self.instance._fetched_graph.node_set.all()
+            else:
+                self._graph_nodes = self.find_graph_nodes()
         return self._graph_nodes
 
     def find_graph_nodes(self):
@@ -93,9 +96,9 @@ class ArchesTileSerializer(serializers.ModelSerializer, NodeFetcherMixin):
         fields = "__all__"
 
     def __init__(self, instance=None, data=fields.empty, **kwargs):
+        self._graph_nodes = kwargs.pop("graph_nodes", [])
         super().__init__(instance, data, **kwargs)
         self._root_node = None
-        self._graph_nodes = []
         self._child_nodegroup_aliases = []
 
     @staticmethod
@@ -265,13 +268,12 @@ class ArchesResourceSerializer(serializers.ModelSerializer, NodeFetcherMixin):
         fields = super().get_fields()
         self._nodegroup_aliases = []
 
-        assert self.graph_nodes
         for node in self.graph_nodes:
             if node.alias not in self.root_node_aliases:
                 continue
             # This will be unnecessary once root_node_aliases functions
             # as described (TODO)
-            if node.nodegroup.parentnodegroup_id:
+            if not node.nodegroup_id or node.nodegroup.parentnodegroup_id:
                 continue
             if node.pk == node.nodegroup.pk:
                 self._nodegroup_aliases.append(node.alias)

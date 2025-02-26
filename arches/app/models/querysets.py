@@ -89,6 +89,7 @@ class TileQuerySet(QuerySet):
     def _prefetch_related_objects(self):
         """Call datatype to_python() methods when materializing the QuerySet.
         Discard annotations that do not pertain to this nodegroup.
+        Memoize fetched nodes.
         """
         from arches.app.datatypes.datatypes import DataTypeFactory
         from arches.app.models.models import TileModel
@@ -126,10 +127,10 @@ class TileQuerySet(QuerySet):
                 setattr(tile, child_tile.nodegroup_alias, children)
 
     def _clone(self):
-        ret = super()._clone()
-        ret._fetched_nodes = self._fetched_nodes
-        ret._as_representation = self._as_representation
-        return ret
+        clone = super()._clone()
+        clone._fetched_nodes = self._fetched_nodes
+        clone._as_representation = self._as_representation
+        return clone
 
 
 class ResourceInstanceQuerySet(QuerySet):
@@ -137,6 +138,7 @@ class ResourceInstanceQuerySet(QuerySet):
         super().__init__(model, query, using, hints)
         self._as_representation = False
         self._fetched_nodes = []
+        self._fetched_graph = None
 
     def with_nodegroups(
         self,
@@ -202,7 +204,7 @@ class ResourceInstanceQuerySet(QuerySet):
         to_representation() instead (rather than to_json() just to ensure we are
         getting optimum performance and not yoking this feature to older use cases.)
         """
-        from arches.app.models.models import GraphModel, NodeGroup, TileModel
+        from arches.app.models.models import GraphModel, Node, NodeGroup, TileModel
 
         self._as_representation = as_representation
 
@@ -217,32 +219,36 @@ class ResourceInstanceQuerySet(QuerySet):
         try:
             # Prefetch sibling nodes for use in _prefetch_related_objects()
             # and generate_tile_annotations().
-            # TODO: avoid doing a query here.
+            # 9 queries: consider factoring this out.
             source_graph = graph_query.prefetch_related(
-                "node_set__nodegroup__node_set"
-            ).get()
+                "node_set__nodegroup__node_set",
+                "node_set__nodegroup__grouping_node__nodegroup",
+                "node_set__nodegroup__children__grouping_node",
+                "node_set__cardxnodexwidget_set",
+            ).get()  # TODO: seal grouping_node.nodegroup
         except GraphModel.DoesNotExist as e:
             e.add_note(f"No graph found with slug: {graph_slug}")
             raise
 
-        nodes = source_graph.node_set.select_related(
-            "nodegroup__grouping_node__nodegroup"
-        )
         node_alias_annotations = generate_tile_annotations(
-            nodes,
+            source_graph.node_set.all(),
             defer=defer,
             only=only,
             model=self.model,
             outer_ref="resourceinstanceid",
         )
-        self._fetched_nodes = [n for n in nodes if n.alias in node_alias_annotations]
+        self._fetched_nodes = [
+            node
+            for node in source_graph.node_set.all()
+            if node.alias in node_alias_annotations and not node.source_identifier_id
+        ]
+        self._fetched_graph = source_graph
 
         if resource_ids:
             qs = self.filter(pk__in=resource_ids)
         else:
             qs = self.filter(graph=source_graph)
         return qs.prefetch_related(
-            "graph__node_set__nodegroup",
             Prefetch(
                 "tilemodel_set",
                 queryset=TileModel.objects.with_node_values(
@@ -266,7 +272,7 @@ class ResourceInstanceQuerySet(QuerySet):
         """
         Attach annotated tiles to resource instances in a nested structure.
         Discard annotations only used for shallow filtering.
-        Memoize fetched root node aliases.
+        Memoize fetched root node aliases (and graph source nodes).
         """
         super()._prefetch_related_objects()
 
@@ -281,6 +287,7 @@ class ResourceInstanceQuerySet(QuerySet):
                 continue
             # TODO: fix misnomer, since it's not just root nodes.
             resource._fetched_root_nodes = set()
+            resource._fetched_graph = self._fetched_graph
             for node in self._fetched_nodes:
                 delattr(resource, node.alias)
             for root_node in root_nodes:
@@ -337,10 +344,11 @@ class ResourceInstanceQuerySet(QuerySet):
                     delattr(resource, node.alias)
 
     def _clone(self):
-        ret = super()._clone()
-        ret._fetched_nodes = self._fetched_nodes
-        ret._as_representation = self._as_representation
-        return ret
+        clone = super()._clone()
+        clone._fetched_nodes = self._fetched_nodes
+        clone._fetched_graph = self._fetched_graph
+        clone._as_representation = self._as_representation
+        return clone
 
     @staticmethod
     def _find_parent_tile_from_annotated_tiles(child_tile, annotated_tiles):

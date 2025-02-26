@@ -48,6 +48,8 @@ def generate_tile_annotations(nodes, *, defer, only, model, lhs=None, outer_ref)
             continue
         if node.nodegroup_id is None:
             continue
+        if node.source_identifier_id:
+            continue
         if is_resource:
             root = node.nodegroup.grouping_node
             if (defer and root.alias in defer) or (only and root.alias not in only):

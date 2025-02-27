@@ -79,10 +79,6 @@ class NodeFetcherMixin:
             )
         )
 
-    @property
-    def root_node_aliases(self):
-        return [node.alias for node in self.graph_nodes]
-
 
 class ArchesTileSerializer(serializers.ModelSerializer, NodeFetcherMixin):
     tileid = serializers.UUIDField(validators=[], required=False)
@@ -262,22 +258,26 @@ class ArchesResourceSerializer(serializers.ModelSerializer, NodeFetcherMixin):
     def __init__(self, instance=None, data=fields.empty, **kwargs):
         super().__init__(instance, data, **kwargs)
         self._graph_nodes = []
-        self._nodegroup_aliases = []
+        self._root_node_aliases = []
 
     def get_fields(self):
         fields = super().get_fields()
-        self._nodegroup_aliases = []
+        self._root_node_aliases = []
+        options = self.__class__.Meta
 
         for node in self.graph_nodes:
-            if node.alias not in self.root_node_aliases:
-                continue
-            # This will be unnecessary once root_node_aliases functions
-            # as described (TODO)
             if not node.nodegroup_id or node.nodegroup.parentnodegroup_id:
                 continue
+            if options.nodegroups == "__all__":
+                only = self.context.get("nodegroup_alias")
+            else:
+                only = options.nodegroups
+            if only and node.nodegroup.grouping_node.alias not in only:
+                continue
             if node.pk == node.nodegroup.pk:
-                self._nodegroup_aliases.append(node.alias)
+                self._root_node_aliases.append(node.alias)
                 if node.alias not in fields:
+                    # TODO: check "fields" option in Meta for node level control.
                     fields[node.alias] = _make_tile_serializer(
                         slug=self.graph_slug,
                         nodegroup_alias=node.alias,
@@ -289,13 +289,13 @@ class ArchesResourceSerializer(serializers.ModelSerializer, NodeFetcherMixin):
 
     def get_default_field_names(self, declared_fields, model_info):
         field_names = super().get_default_field_names(declared_fields, model_info)
-        aliases = self.__class__.Meta.fields
-        if aliases != "__all__":
+        options = self.__class__.Meta
+        if options.fields != "__all__":
             raise NotImplementedError  # TODO...
-        # if self.root_node_aliases:
-        #     field_names.extend(self.root_node_aliases)
-        # else:
-        field_names.extend(self._nodegroup_aliases)
+        if options.nodegroups == "__all__":
+            field_names.extend(self._root_node_aliases)
+        else:
+            field_names.extend(options.nodegroups)
         return field_names
 
     def build_relational_field(self, field_name, relation_info):
@@ -324,7 +324,7 @@ class ArchesResourceSerializer(serializers.ModelSerializer, NodeFetcherMixin):
             instance_without_tile_data = super().create(validated_data)
             instance_from_factory = options.model.as_model(
                 graph_slug=self.graph_slug,
-                only=self.root_node_aliases,
+                only=self.fields,
             ).get(pk=instance_without_tile_data.pk)
             instance_from_factory._as_representation = True
             updated = self.update(instance_from_factory, validated_data)

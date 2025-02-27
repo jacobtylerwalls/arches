@@ -32,25 +32,12 @@ class ArchesModelAPIMixin:
 
     def dispatch(self, *args, **kwargs):
         options = self.serializer_class.Meta
-        if not options.graph_slug and (graph_slug := self.kwargs.get("graph")):
-            self.graph_slug = graph_slug
-        else:
-            self.graph_slug = options.graph_slug
+        self.graph_slug = options.graph_slug or kwargs.get("graph")
+        # Future: accept list via GET query param
+        self.nodegroup_alias = kwargs.get("nodegroup_alias")
 
-        if issubclass(options.model, ResourceInstance):
-            self.root_nodes = options.nodegroups
-            if options.nodegroups == "__all__" and (
-                nodegroup_alias := kwargs.get("nodegroup_alias")
-            ):
-                self.root_node_aliases = [nodegroup_alias]
-            else:
-                self.root_node_aliases = None
-        else:
-            self.root_node_aliases = [
-                options.root_node or kwargs.get("nodegroup_alias")
-            ]
-
-        self._nodegroup_alias = kwargs.get("nodegroup_alias")
+        if issubclass(options.model, TileModel):
+            self.nodegroup_alias = options.root_node or self.nodegroup_alias
 
         return super().dispatch(*args, **kwargs)
 
@@ -59,14 +46,18 @@ class ArchesModelAPIMixin:
         if options.fields == "__all__":
             fields = None
         else:
-            raise NotImplementedError
+            fields = options.fields
         if issubclass(options.model, ResourceInstance):
+            if options.nodegroups == "__all__":
+                only = self.nodegroup_alias  # might be None or a single alias
+            else:
+                only = options.nodegroups
             return options.model.as_model(
-                self.graph_slug, only=self.root_node_aliases, as_representation=True
+                self.graph_slug, only=only, as_representation=True
             )
         if issubclass(options.model, TileModel):
             return options.model.as_nodegroup(
-                self.root_node_aliases[0],
+                self.nodegroup_alias,
                 graph_slug=self.graph_slug,
                 only=fields,
                 as_representation=True,
@@ -77,7 +68,7 @@ class ArchesModelAPIMixin:
         return {
             **super().get_serializer_context(),
             "graph_slug": self.graph_slug,
-            "nodegroup_alias": self._nodegroup_alias,
+            "nodegroup_alias": self.nodegroup_alias,
         }
 
     def get_object(self, user=None, permission_callable=None):

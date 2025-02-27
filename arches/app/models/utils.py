@@ -40,7 +40,7 @@ def generate_tile_annotations(nodes, *, defer, only, model, lhs=None, outer_ref)
         n.alias for n in filter_nodes_by_highest_parent(nodes, defer or [])
     }
     only_node_aliases = {
-        n.alias for n in filter_nodes_by_highest_parent(nodes, defer or [])
+        n.alias for n in filter_nodes_by_highest_parent(nodes, only or [])
     }
     if (
         deferred_node_aliases

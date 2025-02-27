@@ -132,7 +132,7 @@ def get_nodegroups_here_and_below(start_nodegroup):
     def accumulate(nodegroup):
         nonlocal accumulator
         accumulator.append(nodegroup)
-        for child_nodegroup in nodegroup.children.all():
+        for child_nodegroup in nodegroup.children.prefetch_related("node_set"):
             accumulate(child_nodegroup)
 
     accumulate(start_nodegroup)
@@ -149,6 +149,6 @@ def filter_nodes_by_highest_parent(nodes, aliases):
             logger.warning(f"Node alias {alias} not found in nodes.")
         nodegroups = get_nodegroups_here_and_below(node.nodegroup)
         for nodegroup in nodegroups:
-            filtered_nodes &= set(nodegroup.node_set.all())
+            filtered_nodes |= set(nodegroup.node_set.all())
 
     return filtered_nodes

@@ -1,6 +1,11 @@
+import logging
+
 from django.contrib.postgres.expressions import ArraySubquery
 from django.db.models import OuterRef
 from django.db.models.expressions import BaseExpression
+
+
+logger = logging.getLogger(__name__)
 
 
 def add_to_update_fields(kwargs, field_name):
@@ -31,8 +36,18 @@ def generate_tile_annotations(nodes, *, defer, only, model, lhs=None, outer_ref)
     from arches.app.datatypes.datatypes import DataTypeFactory
     from arches.app.models.models import ResourceInstance, TileModel
 
-    if defer and only and (overlap := set(defer).intersection(set(only))):
-        raise ValueError(f"Got intersecting defer/only args: {overlap}")
+    deferred_node_aliases = {
+        n.alias for n in filter_nodes_by_highest_parent(nodes, defer or [])
+    }
+    only_node_aliases = {
+        n.alias for n in filter_nodes_by_highest_parent(nodes, defer or [])
+    }
+    if (
+        deferred_node_aliases
+        and only_node_aliases
+        and (overlap := deferred_node_aliases.intersection(only_node_aliases))
+    ):
+        raise ValueError(f"Got intersecting defer/only nodes: {overlap}")
     datatype_factory = DataTypeFactory()
     node_alias_annotations = {}
     invalid_names = field_names(model)
@@ -50,13 +65,10 @@ def generate_tile_annotations(nodes, *, defer, only, model, lhs=None, outer_ref)
             continue
         if node.source_identifier_id:
             continue
-        if is_resource:
-            root = node.nodegroup.grouping_node
-            if (defer and root.alias in defer) or (only and root.alias not in only):
-                continue
-        else:
-            if (defer and node.alias in defer) or (only and node.alias not in only):
-                continue
+        if (deferred_node_aliases and node.alias in deferred_node_aliases) or (
+            only_node_aliases and node.alias not in only_node_aliases
+        ):
+            continue
         if node.alias in invalid_names:
             raise ValueError(f'"{node.alias}" clashes with a model field name.')
 
@@ -112,3 +124,31 @@ def get_values_query(*, nodegroup, base_lookup, lhs=None, outer_ref) -> BaseExpr
         return tile_query
     else:
         return ArraySubquery(tile_query)
+
+
+def get_nodegroups_here_and_below(start_nodegroup):
+    accumulator = []
+
+    def accumulate(nodegroup):
+        nonlocal accumulator
+        accumulator.append(nodegroup)
+        for child_nodegroup in nodegroup.children.all():
+            accumulate(child_nodegroup)
+
+    accumulate(start_nodegroup)
+    return accumulator
+
+
+def filter_nodes_by_highest_parent(nodes, aliases):
+    filtered_nodes = set()
+    for alias in aliases:
+        for node in nodes:
+            if node.alias == alias:
+                break
+        else:
+            logger.warning(f"Node alias {alias} not found in nodes.")
+        nodegroups = get_nodegroups_here_and_below(node.nodegroup)
+        for nodegroup in nodegroups:
+            filtered_nodes &= set(nodegroup.node_set.all())
+
+    return filtered_nodes

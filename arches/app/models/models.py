@@ -19,6 +19,7 @@ from arches.app.models.utils import (
     add_to_update_fields,
     field_names,
     field_attnames,
+    get_nodegroups_here_and_below,
     pop_arches_model_kwargs,
 )
 from arches.app.utils.betterJSONSerializer import JSONSerializer
@@ -2080,14 +2081,9 @@ class TileModel(models.Model):  # Tile
         """
 
         root_node = cls._root_node(graph_slug, root_node_alias)
-
-        def accumulate_nodes_below(nodegroup, acc):
-            acc.extend(list(nodegroup.node_set.all()))
-            for child_nodegroup in nodegroup.children.all():
-                accumulate_nodes_below(child_nodegroup, acc)
-
         branch_nodes = []
-        accumulate_nodes_below(root_node.nodegroup, acc=branch_nodes)
+        for nodegroup in get_nodegroups_here_and_below(root_node.nodegroup):
+            branch_nodes.extend(list(nodegroup.node_set.all()))
 
         return (
             cls.objects.filter(nodegroup_id=root_node.pk)

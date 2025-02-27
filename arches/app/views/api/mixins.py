@@ -49,7 +49,10 @@ class ArchesModelAPIMixin:
             fields = options.fields
         if issubclass(options.model, ResourceInstance):
             if options.nodegroups == "__all__":
-                only = self.nodegroup_alias  # might be None or a single alias
+                if self.nodegroup_alias:
+                    only = [self.nodegroup_alias]
+                else:
+                    only = None
             else:
                 only = options.nodegroups
             return options.model.as_model(

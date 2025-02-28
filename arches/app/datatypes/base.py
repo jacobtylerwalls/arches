@@ -12,9 +12,6 @@ logger = logging.getLogger(__name__)
 
 
 class BaseDataType(object):
-    rest_framework_model_field = None
-    """Django model field if the datatype were to be a real table column."""
-
     def __init__(self, model=None):
         self.datatype_model = model
         self.datatype_name = model.datatype if model else None

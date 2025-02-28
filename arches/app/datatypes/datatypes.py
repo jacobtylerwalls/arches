@@ -45,8 +45,6 @@ from arches.app.search.elasticsearch_dsl_builder import (
 from arches.app.search.search_engine_factory import SearchEngineInstance as se
 from arches.app.search.search_term import SearchTerm
 from arches.app.search.mappings import RESOURCES_INDEX
-
-from django.contrib.postgres.fields import ArrayField
 from django.core.cache import cache
 from django.core.files import File
 from django.core.files.images import get_image_dimensions
@@ -116,8 +114,6 @@ class DataTypeFactory(object):
 
 
 class StringDataType(BaseDataType):
-    rest_framework_model_field = JSONField(null=True)
-
     def validate(
         self,
         value,
@@ -458,8 +454,6 @@ class StringDataType(BaseDataType):
 
 
 class NumberDataType(BaseDataType):
-    rest_framework_model_field = fields.FloatField(null=True)
-
     def validate(
         self,
         value,
@@ -590,8 +584,6 @@ class NumberDataType(BaseDataType):
 
 
 class BooleanDataType(BaseDataType):
-    rest_framework_model_field = fields.BooleanField(null=True)
-
     def validate(
         self,
         value,
@@ -693,8 +685,6 @@ class BooleanDataType(BaseDataType):
 
 
 class DateDataType(BaseDataType):
-    rest_framework_model_field = fields.DateField(null=True)
-
     def validate(
         self,
         value,
@@ -912,8 +902,6 @@ class DateDataType(BaseDataType):
 
 
 class EDTFDataType(BaseDataType):
-    rest_framework_model_field = fields.CharField(null=True)
-
     def transform_value_for_tile(self, value, **kwargs):
         transformed_value = ExtendedDateFormat(value)
         if transformed_value.edtf is None:
@@ -1087,8 +1075,6 @@ class EDTFDataType(BaseDataType):
 
 
 class FileListDataType(BaseDataType):
-    rest_framework_model_field = ArrayField(base_field=fields.CharField(), null=True)
-
     def __init__(self, model=None):
         super(FileListDataType, self).__init__(model=model)
         self.node_lookup = {}
@@ -2045,8 +2031,6 @@ class ResourceInstanceDataType(BaseDataType):
 
     """
 
-    rest_framework_model_field = JSONField(null=True)
-
     def validate(
         self,
         value,
@@ -2440,10 +2424,6 @@ class ResourceInstanceDataType(BaseDataType):
 
 
 class ResourceInstanceListDataType(ResourceInstanceDataType):
-    rest_framework_model_field = ArrayField(
-        base_field=ResourceInstanceDataType.rest_framework_model_field, null=True
-    )
-
     def to_json(self, tile, node):
         from arches.app.models.resource import (
             Resource,

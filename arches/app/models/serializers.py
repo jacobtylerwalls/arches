@@ -2,17 +2,19 @@ from copy import deepcopy
 from functools import lru_cache
 
 from django.conf import settings
+from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import MultipleObjectsReturned, ObjectDoesNotExist
 from django.db import transaction
+from django.db.models import fields
+from django.db.models.fields.json import JSONField
 from django.utils.translation import gettext as _
 from rest_framework.exceptions import ValidationError
-from rest_framework import fields
 from rest_framework import renderers
 from rest_framework import serializers
+from rest_framework.fields import empty
 
 from arches.app.models.fields.i18n import I18n_JSON, I18n_String
 from arches.app.models.models import ResourceInstance
-from arches.app.datatypes.datatypes import DataTypeFactory
 from arches.app.models.models import Node, TileModel
 from arches.app.utils.betterJSONSerializer import JSONSerializer
 
@@ -83,6 +85,31 @@ class NodeFetcherMixin:
 class ArchesTileSerializer(serializers.ModelSerializer, NodeFetcherMixin):
     tileid = serializers.UUIDField(validators=[], required=False)
 
+    datatype_field_map = {
+        "string": JSONField(null=True),
+        "number": fields.FloatField(null=True),
+        "concept": fields.UUIDField(null=True),
+        "concept-list": ArrayField(base_field=fields.UUIDField(null=True), null=True),
+        "date": fields.DateField(null=True),
+        "node-value": fields.CharField(null=True),  # XXX
+        "edtf": fields.CharField(null=True),  # XXX
+        "annotation": fields.CharField(null=True),  # XXX
+        "url": fields.URLField(null=True),
+        "resource-instance": JSONField(null=True),
+        "resource-instance-list": ArrayField(
+            base_field=JSONField(null=True), null=True
+        ),
+        "boolean": fields.BooleanField(null=True),
+        "domain-value": ArrayField(base_field=fields.UUIDField(null=True), null=True),
+        "domain-value-list": ArrayField(
+            base_field=fields.UUIDField(null=True), null=True
+        ),
+        "non-localized-string": fields.CharField(null=True),
+        "geojson-feature-collection": fields.CharField(null=True),  # XXX
+        "file-list": ArrayField(base_field=fields.CharField(), null=True),
+        "reference": JSONField(null=True),
+    }
+
     class Meta:
         model = TileModel
         # If None, supply by a route providing a <slug:graph> component
@@ -91,7 +118,7 @@ class ArchesTileSerializer(serializers.ModelSerializer, NodeFetcherMixin):
         root_node = None
         fields = "__all__"
 
-    def __init__(self, instance=None, data=fields.empty, **kwargs):
+    def __init__(self, instance=None, data=empty, **kwargs):
         self._graph_nodes = kwargs.pop("graph_nodes", [])
         super().__init__(instance, data, **kwargs)
         self._root_node = None
@@ -153,8 +180,7 @@ class ArchesTileSerializer(serializers.ModelSerializer, NodeFetcherMixin):
                 f"Node with alias {field_name} not found in graph {self.graph_slug}"
             )
 
-        datatype = DataTypeFactory().get_instance(node.datatype)
-        model_field = deepcopy(datatype.rest_framework_model_field)
+        model_field = deepcopy(self.datatype_field_map[node.datatype])
         if model_field is None:
             if node.nodegroup.grouping_node == node:
                 model_field = _make_tile_serializer(
@@ -256,7 +282,7 @@ class ArchesResourceSerializer(serializers.ModelSerializer, NodeFetcherMixin):
         nodegroups = "__all__"
         fields = "__all__"
 
-    def __init__(self, instance=None, data=fields.empty, **kwargs):
+    def __init__(self, instance=None, data=empty, **kwargs):
         super().__init__(instance, data, **kwargs)
         self._graph_nodes = []
         self._root_node_aliases = []

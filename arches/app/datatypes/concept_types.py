@@ -2,14 +2,10 @@ from arches.app.utils.betterJSONSerializer import JSONSerializer
 import uuid
 import csv
 import logging
-
-from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import ObjectDoesNotExist
-from django.db.models import fields
 from django.utils.translation import gettext as _
-from django.core.cache import cache
-
 from arches.app.models import models
+from django.core.cache import cache
 from arches.app.models.system_settings import settings
 from arches.app.datatypes.base import BaseDataType
 from arches.app.datatypes.datatypes import DataTypeFactory, get_value_from_jsonld
@@ -43,8 +39,6 @@ logger = logging.getLogger(__name__)
 
 
 class BaseConceptDataType(BaseDataType):
-    rest_framework_model_field = fields.UUIDField(null=True)
-
     def __init__(self, model=None):
         super(BaseConceptDataType, self).__init__(model=model)
         self.value_lookup = {}
@@ -416,10 +410,6 @@ class ConceptDataType(BaseConceptDataType):
 
 
 class ConceptListDataType(BaseConceptDataType):
-    rest_framework_model_field = ArrayField(
-        base_field=BaseConceptDataType.rest_framework_model_field, null=True
-    )
-
     def validate(
         self,
         value,

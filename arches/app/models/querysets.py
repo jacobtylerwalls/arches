@@ -19,8 +19,6 @@ class TileQuerySet(QuerySet):
         root_node=None,
         defer=None,
         only=None,
-        lhs=None,
-        outer_ref,
         depth=1,
         as_representation=False,
         allow_empty=False,
@@ -48,7 +46,7 @@ class TileQuerySet(QuerySet):
         workflows involving creating a blank tile before fetching the richer
         version from this factory.
         """
-        from arches.app.models.models import TileModel
+        from arches.app.models.models import NodeGroup, TileModel
 
         self._as_representation = as_representation
 
@@ -63,28 +61,27 @@ class TileQuerySet(QuerySet):
             defer=deferred_node_aliases,
             only=only_node_aliases,
             model=self.model,
-            lhs=lhs,
-            outer_ref=outer_ref,
         )
 
+        max_depth = 5
         prefetches = []
-        if depth:
+        if root_node:
+            child_nodegroup_aliases = {
+                child.grouping_node.alias
+                for child in root_node.nodegroup.children.all()
+            }
+        else:
             child_nodegroup_aliases = None
-            if root_node:
-                child_nodegroup_aliases = {
-                    child.grouping_node.alias
-                    for child in root_node.nodegroup.children.all()
-                }
+        if depth < max_depth:
             prefetches.append(
                 Prefetch(
-                    "children",
+                    "__".join(["children"] * depth),
                     queryset=TileModel.objects.with_node_values(
                         nodes,
+                        root_node=root_node,
                         defer=defer,
                         only=child_nodegroup_aliases,
-                        depth=depth - 1,
-                        lhs="parenttile",
-                        outer_ref="tileid",
+                        depth=depth + 1,
                         allow_empty=allow_empty,
                     ),
                 )
@@ -100,6 +97,11 @@ class TileQuerySet(QuerySet):
         return (
             qs.prefetch_related(*prefetches)
             .annotate(**node_alias_annotations)
+            .annotate(
+                cardinality=NodeGroup.objects.filter(
+                    pk=OuterRef("nodegroup_id")
+                ).values("cardinality")
+            )
             .order_by("sortorder")
         )
 
@@ -141,7 +143,10 @@ class TileQuerySet(QuerySet):
                 setattr(child_tile, tile.nodegroup_alias, child_tile.parenttile)
                 children = getattr(tile, child_tile.nodegroup_alias, [])
                 children.append(child_tile)
-                setattr(tile, child_tile.nodegroup_alias, children)
+                if child_tile.cardinality == "1":
+                    setattr(tile, child_tile.nodegroup_alias, children[0])
+                else:
+                    setattr(tile, child_tile.nodegroup_alias, children)
 
     def _clone(self):
         clone = super()._clone()
@@ -221,7 +226,7 @@ class ResourceInstanceQuerySet(QuerySet):
         to_representation() instead (rather than to_json() just to ensure we are
         getting optimum performance and not yoking this feature to older use cases.)
         """
-        from arches.app.models.models import GraphModel, NodeGroup, TileModel
+        from arches.app.models.models import GraphModel, TileModel
 
         self._as_representation = as_representation
 
@@ -267,7 +272,6 @@ class ResourceInstanceQuerySet(QuerySet):
             defer=deferred_node_aliases,
             only=only_node_aliases,
             model=self.model,
-            outer_ref="resourceinstanceid",
         )
         self._fetched_nodes = [
             node
@@ -285,16 +289,8 @@ class ResourceInstanceQuerySet(QuerySet):
                 "tilemodel_set",
                 queryset=TileModel.objects.with_node_values(
                     self._fetched_nodes,
-                    lhs="pk",
-                    outer_ref="tileid",
                     as_representation=as_representation,
-                )
-                .annotate(
-                    cardinality=NodeGroup.objects.filter(
-                        pk=OuterRef("nodegroup_id")
-                    ).values("cardinality")
-                )
-                .select_related("parenttile"),
+                ).select_related("parenttile"),
                 to_attr="_annotated_tiles",
             ),
         ).annotate(**node_alias_annotations)
@@ -329,8 +325,6 @@ class ResourceInstanceQuerySet(QuerySet):
                 )
                 resource._fetched_root_nodes.add(root_node)
             annotated_tiles = getattr(resource, "_annotated_tiles", [])
-            # TODO: this is probably what should get passed around, not the array.
-            annotated_tile_lookup = {tile.pk: tile for tile in annotated_tiles}
             for annotated_tile in annotated_tiles:
                 for root_node in root_nodes:
                     if root_node.pk == annotated_tile.nodegroup_id:
@@ -350,24 +344,8 @@ class ResourceInstanceQuerySet(QuerySet):
                     setattr(
                         annotated_tile,
                         annotated_tile.parenttile.nodegroup_alias,
-                        self._find_parent_tile_from_annotated_tiles(
-                            annotated_tile, annotated_tiles
-                        ),
+                        annotated_tile.parenttile,
                     )
-
-                # Attach children to this parent.
-                for child_tile in annotated_tile.children.all():
-                    children = getattr(annotated_tile, child_tile.nodegroup_alias, [])
-                    annotated_child_tile = annotated_tile_lookup[child_tile.pk]
-                    if child_tile in children:
-                        # Seems like I shouldn't have to do this, but look later (TODO).
-                        children[children.index(child_tile)] = annotated_child_tile
-                    else:
-                        children.append(annotated_tile_lookup[child_tile.pk])
-                    if child_tile.nodegroup.cardinality == "1":
-                        setattr(annotated_tile, child_tile.nodegroup_alias, children[0])
-                    else:
-                        setattr(annotated_tile, child_tile.nodegroup_alias, children)
 
             # Final pruning.
             for node in root_nodes:
@@ -380,14 +358,3 @@ class ResourceInstanceQuerySet(QuerySet):
         clone._fetched_graph = self._fetched_graph
         clone._as_representation = self._as_representation
         return clone
-
-    @staticmethod
-    def _find_parent_tile_from_annotated_tiles(child_tile, annotated_tiles):
-        """This search avoids using the parenttile python instance instantiated
-        by Django so that users can crawl the semantic aliases bidirectionally:
-
-        >>> child.parent_alias.children_alias[0].parent_alias.children_alias[0]...
-        """
-        for other_annotated_tile in annotated_tiles:
-            if other_annotated_tile == child_tile.parenttile:
-                return other_annotated_tile

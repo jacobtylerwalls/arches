@@ -1,7 +1,7 @@
 import logging
 
 from django.contrib.postgres.expressions import ArraySubquery
-from django.db.models import OuterRef
+from django.db.models import F, OuterRef
 from django.db.models.expressions import BaseExpression
 
 
@@ -32,8 +32,9 @@ def field_attnames(instance_or_class):
     return {f.attname for f in instance_or_class._meta.fields}
 
 
-def generate_tile_annotations(nodes, *, defer, only, model, lhs=None, outer_ref):
+def generate_tile_annotations(nodes, *, defer, only, model):
     from arches.app.datatypes.datatypes import DataTypeFactory
+    from arches.app.models.models import ResourceInstance, TileModel
 
     if defer and only and (overlap := defer.intersection(only)):
         raise ValueError(f"Got intersecting defer/only nodes: {overlap}")
@@ -54,12 +55,15 @@ def generate_tile_annotations(nodes, *, defer, only, model, lhs=None, outer_ref)
             raise ValueError(f'"{node.alias}" clashes with a model field name.')
 
         datatype_instance = datatype_factory.get_instance(node.datatype)
-        tile_values_query = get_values_query(
-            nodegroup=node.nodegroup,
-            base_lookup=datatype_instance.get_base_orm_lookup(node),
-            lhs=lhs,
-            outer_ref=outer_ref,
-        )
+        if issubclass(model, ResourceInstance):
+            tile_values_query = get_tile_values_for_resource(
+                nodegroup=node.nodegroup,
+                base_lookup=datatype_instance.get_base_orm_lookup(node),
+            )
+        elif issubclass(model, TileModel):
+            tile_values_query = F(datatype_instance.get_base_orm_lookup(node))
+        else:
+            raise ValueError
         node_alias_annotations[node.alias] = tile_values_query
 
     if not node_alias_annotations:
@@ -77,30 +81,17 @@ def pop_arches_model_kwargs(kwargs, model_fields):
     return arches_model_data, without_model_data
 
 
-def get_values_query(*, nodegroup, base_lookup, lhs=None, outer_ref) -> BaseExpression:
-    """Return a tile values query expression for use in a
-    ResourceInstanceQuerySet or TileQuerySet.
-
-    lhs: the left-hand side (field_name) of the tile query.
-        If absent, the query will be filtered by nodegroup and resourceinstance.
-    """
+def get_tile_values_for_resource(*, nodegroup, base_lookup) -> BaseExpression:
+    """Return a tile values query expression for use in a ResourceInstanceQuerySet."""
     from arches.app.models.models import TileModel
 
-    if lhs:
-        tile_query = TileModel.objects.filter(**{lhs: OuterRef(outer_ref)})
-    else:
-        tile_query = TileModel.objects.filter(
-            nodegroup_id=nodegroup.pk, resourceinstance_id=OuterRef(outer_ref)
-        )
+    tile_query = TileModel.objects.filter(
+        nodegroup_id=nodegroup.pk, resourceinstance_id=OuterRef("resourceinstanceid")
+    )
     if nodegroup.cardinality == "n":
         tile_query = tile_query.order_by("sortorder")
-
     tile_query = tile_query.values(base_lookup)
-
-    if outer_ref == "tileid":
-        return tile_query
-    else:
-        return ArraySubquery(tile_query)
+    return ArraySubquery(tile_query)
 
 
 def get_nodegroups_here_and_below(start_nodegroup):

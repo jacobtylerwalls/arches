@@ -2092,8 +2092,6 @@ class TileModel(models.Model):  # Tile
                 root_node=root_node,
                 defer=defer,
                 only=[root_node.alias],  # determine whether to expose
-                lhs="pk",
-                outer_ref="tileid",
                 as_representation=as_representation,
                 allow_empty=allow_empty,
             )

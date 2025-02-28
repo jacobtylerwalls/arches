@@ -113,6 +113,7 @@ class ArchesTileSerializer(serializers.ModelSerializer, NodeFetcherMixin):
         fields = super().get_fields()
 
         # __all__ now includes one level of child nodegroups.
+        # TODO: do all, or allow specifying a branch origin.
         if self.__class__.Meta.fields == "__all__":
             for child_nodegroup in self._root_node.nodegroup.children.all():
                 child_nodegroup_alias = child_nodegroup.grouping_node.alias

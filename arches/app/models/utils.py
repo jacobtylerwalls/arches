@@ -34,30 +34,13 @@ def field_attnames(instance_or_class):
 
 def generate_tile_annotations(nodes, *, defer, only, model, lhs=None, outer_ref):
     from arches.app.datatypes.datatypes import DataTypeFactory
-    from arches.app.models.models import ResourceInstance, TileModel
 
-    deferred_node_aliases = {
-        n.alias for n in filter_nodes_by_highest_parent(nodes, defer or [])
-    }
-    only_node_aliases = {
-        n.alias for n in filter_nodes_by_highest_parent(nodes, only or [])
-    }
-    if (
-        deferred_node_aliases
-        and only_node_aliases
-        and (overlap := deferred_node_aliases.intersection(only_node_aliases))
-    ):
+    if defer and only and (overlap := defer.intersection(only)):
         raise ValueError(f"Got intersecting defer/only nodes: {overlap}")
     datatype_factory = DataTypeFactory()
     node_alias_annotations = {}
     invalid_names = field_names(model)
-    is_resource = True
-    if issubclass(model, ResourceInstance):
-        is_resource = True
-    elif issubclass(model, TileModel):
-        is_resource = False
-    else:
-        raise ValueError(model)
+
     for node in nodes:
         if node.datatype == "semantic":
             continue
@@ -65,9 +48,7 @@ def generate_tile_annotations(nodes, *, defer, only, model, lhs=None, outer_ref)
             continue
         if node.source_identifier_id:
             continue
-        if (deferred_node_aliases and node.alias in deferred_node_aliases) or (
-            only_node_aliases and node.alias not in only_node_aliases
-        ):
+        if (defer and node.alias in defer) or (only and node.alias not in only):
             continue
         if node.alias in invalid_names:
             raise ValueError(f'"{node.alias}" clashes with a model field name.')
@@ -83,10 +64,6 @@ def generate_tile_annotations(nodes, *, defer, only, model, lhs=None, outer_ref)
 
     if not node_alias_annotations:
         raise ValueError("All fields were excluded.")
-    if not is_resource:
-        for given_alias in only or []:
-            if given_alias not in node_alias_annotations:
-                raise ValueError(f'"{given_alias}" is not a valid node alias.')
 
     return node_alias_annotations
 

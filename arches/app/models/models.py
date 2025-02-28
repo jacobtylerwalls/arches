@@ -2089,8 +2089,9 @@ class TileModel(models.Model):  # Tile
             cls.objects.filter(nodegroup_id=root_node.pk)
             .with_node_values(
                 branch_nodes,
+                root_node=root_node,
                 defer=defer,
-                only=only,
+                only=[root_node.alias],  # determine whether to expose
                 lhs="pk",
                 outer_ref="tileid",
                 as_representation=as_representation,
@@ -2106,10 +2107,15 @@ class TileModel(models.Model):  # Tile
         qs = (
             Node.objects.filter(graph__slug=graph_slug, alias=root_node_alias)
             .select_related("nodegroup__grouping_node__nodegroup")
-            .prefetch_related("nodegroup__node_set")
-            # Prefetching to a depth of 2 seems like a good trade-off for now.
-            .prefetch_related("nodegroup__children")
-            .prefetch_related("nodegroup__children__children")
+            .prefetch_related(
+                "nodegroup__node_set",
+                "nodegroup__children",
+                "nodegroup__children__grouping_node",
+                "nodegroup__children__node_set",
+                "nodegroup__children__children",
+                "nodegroup__children__children__grouping_node",
+                "nodegroup__children__children__node_set",
+            )
         )
         ret = qs.filter(source_identifier=None).first()
         if ret is None:
@@ -2162,7 +2168,6 @@ class TileModel(models.Model):  # Tile
         self.sortorder = sortorder_max + 1 if sortorder_max is not None else 0
 
     def _save_from_pythonic_model_values(self, *, user=None, index=False, **kwargs):
-        from arches.app.datatypes.datatypes import DataTypeFactory
         from arches.app.models.resource import Resource
         from arches.app.models.tile import Tile
 

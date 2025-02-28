@@ -1,6 +1,9 @@
 from django.db.models import OuterRef, Prefetch, QuerySet
 
-from arches.app.models.utils import generate_tile_annotations
+from arches.app.models.utils import (
+    generate_tile_annotations,
+    filter_nodes_by_highest_parent,
+)
 
 
 class TileQuerySet(QuerySet):
@@ -13,6 +16,7 @@ class TileQuerySet(QuerySet):
         self,
         nodes,
         *,
+        root_node=None,
         defer=None,
         only=None,
         lhs=None,
@@ -48,10 +52,16 @@ class TileQuerySet(QuerySet):
 
         self._as_representation = as_representation
 
+        deferred_node_aliases = {
+            n.alias for n in nodes if n.nodegroup.grouping_node.alias in (defer or [])
+        }
+        only_node_aliases = {
+            n.alias for n in nodes if n.nodegroup.grouping_node.alias in (only or [])
+        }
         node_alias_annotations = generate_tile_annotations(
             nodes,
-            defer=defer,
-            only=only,
+            defer=deferred_node_aliases,
+            only=only_node_aliases,
             model=self.model,
             lhs=lhs,
             outer_ref=outer_ref,
@@ -59,13 +69,19 @@ class TileQuerySet(QuerySet):
 
         prefetches = []
         if depth:
+            child_nodegroup_aliases = None
+            if root_node:
+                child_nodegroup_aliases = {
+                    child.grouping_node.alias
+                    for child in root_node.nodegroup.children.all()
+                }
             prefetches.append(
                 Prefetch(
                     "children",
                     queryset=TileModel.objects.with_node_values(
                         nodes,
                         defer=defer,
-                        only=only,
+                        only=child_nodegroup_aliases,
                         depth=depth - 1,
                         lhs="parenttile",
                         outer_ref="tileid",
@@ -77,8 +93,9 @@ class TileQuerySet(QuerySet):
         self._fetched_nodes = [n for n in nodes if n.alias in node_alias_annotations]
 
         qs = self
+        qs = qs.filter(nodegroup_id__in={n.nodegroup_id for n in nodes})
         if not allow_empty:
-            qs = self.filter(data__has_any_keys=[n.pk for n in self._fetched_nodes])
+            qs = qs.filter(data__has_any_keys=[n.pk for n in self._fetched_nodes])
 
         return (
             qs.prefetch_related(*prefetches)
@@ -239,10 +256,16 @@ class ResourceInstanceQuerySet(QuerySet):
             raise
 
         graph_nodes = source_graph.node_set.all()
+        deferred_node_aliases = {
+            n.alias for n in filter_nodes_by_highest_parent(graph_nodes, defer or [])
+        }
+        only_node_aliases = {
+            n.alias for n in filter_nodes_by_highest_parent(graph_nodes, only or [])
+        }
         node_alias_annotations = generate_tile_annotations(
             graph_nodes,
-            defer=defer,
-            only=only,
+            defer=deferred_node_aliases,
+            only=only_node_aliases,
             model=self.model,
             outer_ref="resourceinstanceid",
         )
@@ -262,7 +285,6 @@ class ResourceInstanceQuerySet(QuerySet):
                 "tilemodel_set",
                 queryset=TileModel.objects.with_node_values(
                     self._fetched_nodes,
-                    only=[n.alias for n in self._fetched_nodes],
                     lhs="pk",
                     outer_ref="tileid",
                     as_representation=as_representation,

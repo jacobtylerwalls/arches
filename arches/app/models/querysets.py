@@ -204,7 +204,7 @@ class ResourceInstanceQuerySet(QuerySet):
         to_representation() instead (rather than to_json() just to ensure we are
         getting optimum performance and not yoking this feature to older use cases.)
         """
-        from arches.app.models.models import GraphModel, Node, NodeGroup, TileModel
+        from arches.app.models.models import GraphModel, NodeGroup, TileModel
 
         self._as_representation = as_representation
 
@@ -219,8 +219,16 @@ class ResourceInstanceQuerySet(QuerySet):
         try:
             # Prefetch sibling nodes for use in _prefetch_related_objects()
             # and generate_tile_annotations().
-            # 9 queries: consider factoring this out.
+            # 9 queries + nodegroup depth: will factor this out.
             source_graph = graph_query.prefetch_related(
+                "node_set__nodegroup__children",
+                "node_set__nodegroup__children__node_set",
+                "node_set__nodegroup__children__children",
+                "node_set__nodegroup__children__children__node_set",
+                "node_set__nodegroup__children__children__children",
+                "node_set__nodegroup__children__children__children__node_set",
+                "node_set__nodegroup__children__children__children__children",
+                "node_set__nodegroup__children__children__children__children__node_set",
                 "node_set__nodegroup__node_set",
                 "node_set__nodegroup__grouping_node__nodegroup",
                 "node_set__nodegroup__children__grouping_node",
@@ -230,8 +238,9 @@ class ResourceInstanceQuerySet(QuerySet):
             e.add_note(f"No graph found with slug: {graph_slug}")
             raise
 
+        graph_nodes = source_graph.node_set.all()
         node_alias_annotations = generate_tile_annotations(
-            source_graph.node_set.all(),
+            graph_nodes,
             defer=defer,
             only=only,
             model=self.model,
@@ -239,7 +248,7 @@ class ResourceInstanceQuerySet(QuerySet):
         )
         self._fetched_nodes = [
             node
-            for node in source_graph.node_set.all()
+            for node in graph_nodes
             if node.alias in node_alias_annotations and not node.source_identifier_id
         ]
         self._fetched_graph = source_graph

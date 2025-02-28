@@ -132,7 +132,7 @@ def get_nodegroups_here_and_below(start_nodegroup):
     def accumulate(nodegroup):
         nonlocal accumulator
         accumulator.append(nodegroup)
-        for child_nodegroup in nodegroup.children.prefetch_related("node_set"):
+        for child_nodegroup in nodegroup.children.all():
             accumulate(child_nodegroup)
 
     accumulate(start_nodegroup)

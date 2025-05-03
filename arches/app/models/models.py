@@ -1718,6 +1718,14 @@ class TileModel(SaveSupportsBlindOverwriteMixin, models.Model):  # Tile
     class Meta:
         managed = True
         db_table = "tiles"
+        indexes = [
+            models.Index(
+                # Order nodegroup first to avoid separately indexing nodegroup.
+                "nodegroup",
+                "resourceinstance",
+                name="nodegroup_and_resource",
+            )
+        ]
 
     def __repr__(self):
         return f"<{self.find_nodegroup_alias()} ({self.pk})>"
